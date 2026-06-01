@@ -1,8 +1,8 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <link rel="manifest" href="manifest.json">
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Pinball Quick Strike</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 10px; background: #121212; color: #eee; }
@@ -50,17 +50,6 @@ async function createOffer() {
     dataChannel = peerConnection.createDataChannel('chat');
     setupDataChannel(dataChannel);
     
-    // Собираем ICE-кандидаты и отправляем на сервер
-    peerConnection.onicecandidate = e => {
-        if (e.candidate) {
-            fetch(SIGNALING + '/ice', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: sessionId, candidate: e.candidate })
-            });
-        }
-    };
-    
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     
@@ -77,29 +66,17 @@ async function createOffer() {
     offerLink.innerHTML = `<strong>Отправь эту ссылку другу:</strong><br>${link}`;
     statusDiv.textContent = 'Ожидание ответа...';
     
-    // Получаем answer и ICE-кандидаты от принимающего
-    pollForAnswerAndIce();
+    pollForAnswer();
 }
 
-async function pollForAnswerAndIce() {
+async function pollForAnswer() {
     const check = async () => {
-        // Получаем answer
-        const answerRes = await fetch(SIGNALING + '/answer?id=' + sessionId);
-        if (answerRes.ok) {
-            const data = await answerRes.json();
-            if (!peerConnection.currentRemoteDescription) {
-                await peerConnection.setRemoteDescription(data.sdp);
-            }
-        }
-        // Получаем ICE-кандидаты от принимающего
-        const iceRes = await fetch(SIGNALING + '/ice?id=' + sessionId);
-        if (iceRes.ok) {
-            const candidates = await iceRes.json();
-            for (const c of candidates) {
-                try {
-                    await peerConnection.addIceCandidate(c);
-                } catch(e) {}
-            }
+        const res = await fetch(SIGNALING + '/answer?id=' + sessionId);
+        if (res.ok) {
+            const data = await res.json();
+            await peerConnection.setRemoteDescription(data.sdp);
+            statusDiv.textContent = '✅ Соединение установлено!';
+            clearInterval(interval);
         }
     };
     const interval = setInterval(check, 2000);
@@ -136,46 +113,17 @@ async function acceptOffer() {
         setupDataChannel(dataChannel);
     };
     
-    // Собираем ICE-кандидаты и отправляем на сервер
-    peerConnection.onicecandidate = e => {
-        if (e.candidate) {
-            fetch(SIGNALING + '/ice', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: sessionId, candidate: e.candidate })
-            });
-        }
-    };
-    
     await peerConnection.setRemoteDescription(data.sdp);
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     
-    // Отправляем answer
     await fetch(SIGNALING + '/answer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: sessionId, sdp: peerConnection.localDescription })
     });
     
-    // Получаем ICE-кандидаты от инициатора
-    pollForIce();
-}
-
-async function pollForIce() {
-    const check = async () => {
-        const res = await fetch(SIGNALING + '/ice?id=' + sessionId);
-        if (res.ok) {
-            const candidates = await res.json();
-            for (const c of candidates) {
-                try {
-                    await peerConnection.addIceCandidate(c);
-                } catch(e) {}
-            }
-        }
-    };
-    setInterval(check, 2000);
-    check();
+    statusDiv.textContent = 'Ответ отправлен. Устанавливаем соединение...';
 }
 
 function sendMessage() {
