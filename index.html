@@ -51,18 +51,15 @@ let sessionId;
 
 async function createOffer() {
     createBtn.disabled = true;
+    // Остановить предыдущий опрос, если есть
     if (window._pollInterval) clearInterval(window._pollInterval);
     if (peerConnection) peerConnection.close();
+    
     peerConnection = new RTCPeerConnection();
     dataChannel = peerConnection.createDataChannel('chat');
     setupDataChannel(dataChannel);
     
     const offer = await peerConnection.createOffer();
-    async function createOffer() {
-    createBtn.disabled = true;
-    if (window._pollInterval) clearInterval(window._pollInterval);
-    if (peerConnection) peerConnection.close();
-    peerConnection = new RTCPeerConnection();
     await peerConnection.setLocalDescription(offer);
     
     const res = await fetch(SIGNALING + '/offer', {
@@ -72,10 +69,13 @@ async function createOffer() {
     });
     const data = await res.json();
     sessionId = data.id;
-        if (window.location.search.includes('id=')) {
+    
+    // Очистить URL от старого id (если есть)
+    if (window.location.search.includes('id=')) {
         const cleanUrl = window.location.origin + window.location.pathname;
         window.history.replaceState(null, '', cleanUrl);
     }
+    
     const link = window.location.href + '?id=' + sessionId;
     offerLink.style.display = 'block';
     offerLink.innerHTML = `<strong>Отправь эту ссылку другу:</strong><br>${link}`;
@@ -84,19 +84,17 @@ async function createOffer() {
     pollForAnswer();
 }
 
-async function pollForAnswer() {
-        window._pollInterval = setInterval(check, 2000);
-    check();
+function pollForAnswer() {
     const check = async () => {
         const res = await fetch(SIGNALING + '/answer?id=' + sessionId);
         if (res.ok) {
             const data = await res.json();
             await peerConnection.setRemoteDescription(data.sdp);
             statusDiv.textContent = '✅ Соединение установлено!';
-            clearInterval(interval);
+            clearInterval(window._pollInterval);
         }
     };
-        window._pollInterval = setInterval(check, 2000);
+    window._pollInterval = setInterval(check, 2000);
     check();
 }
 
