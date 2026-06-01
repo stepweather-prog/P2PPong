@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pinball ProtoP2P</title>
+    <style>
+        body { font-family: sans-serif; max-width: 400px; margin: 40px auto; padding: 0 20px; background: #121212; color: #eee; }
+        input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 6px; }
+        button { background: #2E7D32; cursor: pointer; }
+        button:hover { background: #388E3C; }
+        #status { margin-top: 10px; color: #aaa; }
+        label { display: block; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h3>🧠 Pinball ProtoP2P</h3>
+    <input type="text" id="messageInput" placeholder="Введите сообщение">
+    <label>
+        <input type="checkbox" id="bounceMode"> Включить отскок (пинбол)
+    </label>
+    <button onclick="sendPinball()">Отправить</button>
+    <div id="status"></div>
+
+    <script>
+        const statusDiv = document.getElementById('status');
+        const messageInput = document.getElementById('messageInput');
+
+        const nodes = [
+            { url: 'https://file.io', method: 'POST' },
+            { url: 'https://0x0.st', method: 'POST' },
+            { url: 'https://cl1p.net', method: 'POST' },
+            { url: 'https://ix.io', method: 'POST' },
+            { url: 'https://paste.rs', method: 'POST' }
+        ];
+
+        async function sendPinball() {
+            const text = messageInput.value.trim();
+            if (!text) { statusDiv.textContent = 'Введите сообщение'; return; }
+            const useBounce = document.getElementById('bounceMode').checked;
+            statusDiv.textContent = 'Поиск живых узлов...';
+
+            const controllers = nodes.map(() => new AbortController());
+            const tasks = nodes.map((node, i) => {
+                const formData = new FormData();
+                formData.append('file', new Blob([text], {type: 'text/plain'}), 'message.txt');
+                return fetch(node.url, {
+                    method: node.method,
+                    body: formData,
+                    signal: controllers[i].signal
+                }).then(r => r.text()).then(data => ({ node: node.url, data }));
+            });
+
+            try {
+                const first = await Promise.any(tasks);
+                controllers.forEach(c => c.abort());
+                statusDiv.innerHTML = `✅ Отправлено через ${first.node}<br>Ответ: ${first.data.substring(0, 100)}`;
+            } catch (e) {
+                statusDiv.textContent = '❌ Все узлы недоступны. Попробуйте позже или используйте ручной режим.';
+            }
+        }
+    </script>
+</body>
+</html>
