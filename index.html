@@ -2,54 +2,87 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>WebRTC Pinball Test</title>
+    <title>Pinball Quick Strike</title>
     <style>
         body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 10px; background: #121212; color: #eee; }
         button { padding: 8px 15px; margin: 5px; background: #2E7D32; border: none; color: white; border-radius: 4px; cursor: pointer; }
         button:hover { background: #388E3C; }
-        textarea { width: 100%; height: 80px; margin: 5px 0; background: #1e1e1e; color: #ccc; border: 1px solid #444; padding: 5px; font-family: monospace; }
         input { width: calc(100% - 20px); padding: 8px; margin: 5px 0; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 4px; }
         #chat { border: 1px solid #333; min-height: 150px; padding: 10px; margin: 10px 0; background: #1a1a1a; overflow-y: auto; }
         #status { color: #888; }
+        .link-box { word-break: break-all; background: #1e1e1e; padding: 10px; border: 1px solid #444; margin: 10px 0; }
     </style>
 </head>
 <body>
-    <h3>🧪 WebRTC Direct Test</h3>
+    <h3>⚡ Быстрая стрела (автоматическая)</h3>
     <div>
-        <button onclick="createOffer()">1. Создать SDP (Offer)</button>
-        <textarea id="localSDP" placeholder="Здесь появится твой SDP. Скопируй его и отправь другу." readonly></textarea>
+        <button id="createBtn">Создать стрелу</button>
+        <div id="offerLink" class="link-box" style="display:none;"></div>
     </div>
     <div>
-        <button onclick="applyRemoteSDP()">2. Вставить SDP друга и соединиться</button>
-        <textarea id="remoteSDP" placeholder="Вставь сюда SDP, полученный от друга."></textarea>
+        <button id="acceptBtn" style="display:none;">Принять стрелу</button>
     </div>
     <div id="chat"></div>
     <div>
         <input type="text" id="messageInput" placeholder="Введи сообщение после соединения" disabled>
-        <button id="sendBtn" disabled onclick="sendMessage()">Отправить</button>
+        <button id="sendBtn" disabled>Отправить</button>
     </div>
     <div id="status">Ожидание действий...</div>
 
 <script>
+const SIGNALING = 'https://pinball-signaling.stephanclaps.workers.dev';
 const statusDiv = document.getElementById('status');
 const chatDiv = document.getElementById('chat');
-const localSDP = document.getElementById('localSDP');
-const remoteSDP = document.getElementById('remoteSDP');
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
+const createBtn = document.getElementById('createBtn');
+const acceptBtn = document.getElementById('acceptBtn');
+const offerLink = document.getElementById('offerLink');
 
 let peerConnection;
 let dataChannel;
+let sessionId;
 
 async function createOffer() {
+    createBtn.disabled = true;
     peerConnection = new RTCPeerConnection();
     dataChannel = peerConnection.createDataChannel('chat');
     setupDataChannel(dataChannel);
     
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
-    localSDP.value = JSON.stringify(peerConnection.localDescription);
-    statusDiv.textContent = 'SDP создан. Скопируй его и передай другу.';
+    
+    // Отправляем offer на Workers
+    const res = await fetch(SIGNALING + '/offer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sdp: peerConnection.localDescription })
+    });
+    const data = await res.json();
+    sessionId = data.id;
+    
+    // Показываем ссылку-приглашение
+    const link = window.location.href + '?id=' + sessionId;
+    offerLink.style.display = 'block';
+    offerLink.innerHTML = `<strong>Отправь эту ссылку другу:</strong><br>${link}`;
+    statusDiv.textContent = 'Ожидание ответа...';
+    
+    // Опрашиваем Workers на наличие answer
+    pollForAnswer();
+}
+
+async function pollForAnswer() {
+    const check = async () => {
+        const res = await fetch(SIGNALING + '/answer?id=' + sessionId);
+        if (res.ok) {
+            const data = await res.json();
+            await peerConnection.setRemoteDescription(data.sdp);
+            statusDiv.textContent = '✅ Соединение установлено!';
+            clearInterval(interval);
+        }
+    };
+    const interval = setInterval(check, 2000);
+    check();
 }
 
 function setupDataChannel(channel) {
@@ -65,28 +98,36 @@ function setupDataChannel(channel) {
     };
 }
 
-async function applyRemoteSDP() {
-    if (!peerConnection) {
-        peerConnection = new RTCPeerConnection();
-        peerConnection.ondatachannel = (e) => {
-            dataChannel = e.channel;
-            setupDataChannel(dataChannel);
-        };
-    }
-    try {
-        const sdpObj = JSON.parse(remoteSDP.value);
-        await peerConnection.setRemoteDescription(sdpObj);
-        if (sdpObj.type === 'offer') {
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            localSDP.value = JSON.stringify(peerConnection.localDescription);
-            statusDiv.textContent = 'Ответ создан. Скопируй его и отправь обратно другу.';
-        } else {
-            statusDiv.textContent = 'Соединение устанавливается...';
-        }
-    } catch(e) {
-        statusDiv.textContent = 'Ошибка: ' + e.message;
-    }
+async function acceptOffer() {
+    const params = new URLSearchParams(window.location.search);
+    sessionId = params.get('id');
+    if (!sessionId) return;
+    
+    acceptBtn.style.display = 'none';
+    
+    // Получаем offer с Workers
+    const res = await fetch(SIGNALING + '/offer?id=' + sessionId);
+    if (!res.ok) { statusDiv.textContent = 'Стрела не найдена или истекла.'; return; }
+    const data = await res.json();
+    
+    peerConnection = new RTCPeerConnection();
+    peerConnection.ondatachannel = (e) => {
+        dataChannel = e.channel;
+        setupDataChannel(dataChannel);
+    };
+    
+    await peerConnection.setRemoteDescription(data.sdp);
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    
+    // Отправляем answer на Workers
+    await fetch(SIGNALING + '/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: sessionId, sdp: peerConnection.localDescription })
+    });
+    
+    statusDiv.textContent = 'Ответ отправлен. Устанавливаем соединение...';
 }
 
 function sendMessage() {
@@ -100,6 +141,16 @@ function sendMessage() {
             messageInput.value = '';
         }
     }
+}
+
+createBtn.addEventListener('click', createOffer);
+sendBtn.addEventListener('click', sendMessage);
+
+// Автоматическое принятие, если в URL есть id
+if (window.location.search.includes('id=')) {
+    acceptBtn.style.display = 'block';
+    statusDiv.textContent = 'Нажми "Принять стрелу" для подключения.';
+    acceptBtn.addEventListener('click', acceptOffer);
 }
 </script>
 </body>
