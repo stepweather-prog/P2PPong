@@ -2,63 +2,105 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pinball ProtoP2P</title>
+    <title>WebRTC Pinball Test</title>
     <style>
-        body { font-family: sans-serif; max-width: 400px; margin: 40px auto; padding: 0 20px; background: #121212; color: #eee; }
-        input, button { padding: 10px; margin: 5px 0; width: 100%; box-sizing: border-box; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 6px; }
-        button { background: #2E7D32; cursor: pointer; }
+        body { font-family: sans-serif; max-width: 600px; margin: 20px auto; padding: 10px; background: #121212; color: #eee; }
+        button { padding: 8px 15px; margin: 5px; background: #2E7D32; border: none; color: white; border-radius: 4px; cursor: pointer; }
         button:hover { background: #388E3C; }
-        #status { margin-top: 10px; color: #aaa; }
-        label { display: block; margin: 10px 0; }
+        textarea { width: 100%; height: 80px; margin: 5px 0; background: #1e1e1e; color: #ccc; border: 1px solid #444; padding: 5px; font-family: monospace; }
+        input { width: calc(100% - 20px); padding: 8px; margin: 5px 0; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 4px; }
+        #chat { border: 1px solid #333; min-height: 150px; padding: 10px; margin: 10px 0; background: #1a1a1a; overflow-y: auto; }
+        #status { color: #888; }
     </style>
 </head>
 <body>
-    <h3>🧠 Pinball ProtoP2P</h3>
-    <input type="text" id="messageInput" placeholder="Введите сообщение">
-    <label>
-        <input type="checkbox" id="bounceMode"> Включить отскок (пинбол)
-    </label>
-    <button onclick="sendPinball()">Отправить</button>
-    <div id="status"></div>
+    <h3>🧪 WebRTC Direct Test</h3>
+    <div>
+        <button onclick="createOffer()">1. Создать SDP (Offer)</button>
+        <textarea id="localSDP" placeholder="Здесь появится твой SDP. Скопируй его и отправь другу." readonly></textarea>
+    </div>
+    <div>
+        <button onclick="applyRemoteSDP()">2. Вставить SDP друга и соединиться</button>
+        <textarea id="remoteSDP" placeholder="Вставь сюда SDP, полученный от друга."></textarea>
+    </div>
+    <div id="chat"></div>
+    <div>
+        <input type="text" id="messageInput" placeholder="Введи сообщение после соединения" disabled>
+        <button id="sendBtn" disabled onclick="sendMessage()">Отправить</button>
+    </div>
+    <div id="status">Ожидание действий...</div>
 
-    <script>
-        const statusDiv = document.getElementById('status');
-        const messageInput = document.getElementById('messageInput');
+<script>
+const statusDiv = document.getElementById('status');
+const chatDiv = document.getElementById('chat');
+const localSDP = document.getElementById('localSDP');
+const remoteSDP = document.getElementById('remoteSDP');
+const messageInput = document.getElementById('messageInput');
+const sendBtn = document.getElementById('sendBtn');
 
-        const nodes = [
-            { url: 'https://file.io', method: 'POST' },
-            { url: 'https://0x0.st', method: 'POST' },
-            { url: 'https://cl1p.net', method: 'POST' },
-            { url: 'https://ix.io', method: 'POST' },
-            { url: 'https://paste.rs', method: 'POST' }
-        ];
+let peerConnection;
+let dataChannel;
 
-        async function sendPinball() {
-            const text = messageInput.value.trim();
-            if (!text) { statusDiv.textContent = 'Введите сообщение'; return; }
-            const useBounce = document.getElementById('bounceMode').checked;
-            statusDiv.textContent = 'Поиск живых узлов...';
+async function createOffer() {
+    peerConnection = new RTCPeerConnection();
+    dataChannel = peerConnection.createDataChannel('chat');
+    setupDataChannel(dataChannel);
+    
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+    localSDP.value = JSON.stringify(peerConnection.localDescription);
+    statusDiv.textContent = 'SDP создан. Скопируй его и передай другу.';
+}
 
-            const controllers = nodes.map(() => new AbortController());
-            const tasks = nodes.map((node, i) => {
-                const formData = new FormData();
-                formData.append('file', new Blob([text], {type: 'text/plain'}), 'message.txt');
-                return fetch(node.url, {
-                    method: node.method,
-                    body: formData,
-                    signal: controllers[i].signal
-                }).then(r => r.text()).then(data => ({ node: node.url, data }));
-            });
+function setupDataChannel(channel) {
+    channel.onopen = () => {
+        statusDiv.textContent = '✅ Канал открыт! Можно общаться.';
+        messageInput.disabled = false;
+        sendBtn.disabled = false;
+    };
+    channel.onmessage = (e) => {
+        const msg = document.createElement('div');
+        msg.textContent = `📩 Друг: ${e.data}`;
+        chatDiv.appendChild(msg);
+    };
+}
 
-            try {
-                const first = await Promise.any(tasks);
-                controllers.forEach(c => c.abort());
-                statusDiv.innerHTML = `✅ Отправлено через ${first.node}<br>Ответ: ${first.data.substring(0, 100)}`;
-            } catch (e) {
-                statusDiv.textContent = '❌ Все узлы недоступны. Попробуйте позже или используйте ручной режим.';
-            }
+async function applyRemoteSDP() {
+    if (!peerConnection) {
+        peerConnection = new RTCPeerConnection();
+        peerConnection.ondatachannel = (e) => {
+            dataChannel = e.channel;
+            setupDataChannel(dataChannel);
+        };
+    }
+    try {
+        const sdpObj = JSON.parse(remoteSDP.value);
+        await peerConnection.setRemoteDescription(sdpObj);
+        if (sdpObj.type === 'offer') {
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            localSDP.value = JSON.stringify(peerConnection.localDescription);
+            statusDiv.textContent = 'Ответ создан. Скопируй его и отправь обратно другу.';
+        } else {
+            statusDiv.textContent = 'Соединение устанавливается...';
         }
-    </script>
+    } catch(e) {
+        statusDiv.textContent = 'Ошибка: ' + e.message;
+    }
+}
+
+function sendMessage() {
+    if (dataChannel && dataChannel.readyState === 'open') {
+        const text = messageInput.value.trim();
+        if (text) {
+            dataChannel.send(text);
+            const msg = document.createElement('div');
+            msg.textContent = `📤 Я: ${text}`;
+            chatDiv.appendChild(msg);
+            messageInput.value = '';
+        }
+    }
+}
+</script>
 </body>
 </html>
