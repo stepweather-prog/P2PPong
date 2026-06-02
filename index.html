@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>P2PPong</title>
+    <title>P2PPong — децентрализованный роутер</title>
     <style>
         html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
         body { display: flex; justify-content: center; align-items: center; }
@@ -11,222 +11,504 @@
         button { padding: 10px 16px; margin: 5px; background: #2E7D32; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 16px; }
         button:hover { background: #388E3C; }
         button:disabled { opacity: 0.5; cursor: not-allowed; }
-        input { width: 100%; padding: 10px; margin: 8px 0; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
+        input, textarea { width: 100%; padding: 10px; margin: 8px 0; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
         #chat { border: 1px solid #333; min-height: 200px; max-height: 50vh; overflow-y: auto; padding: 10px; margin: 10px 0; background: #1a1a1a; border-radius: 6px; }
         #status { color: #888; font-size: 0.9em; margin: 5px 0; }
         .link-box { word-break: break-all; background: #1e1e1e; padding: 10px; border: 1px solid #444; border-radius: 6px; margin: 10px 0; font-size: 0.9em; }
+        .brain-panel { margin-top: 20px; border-top: 1px solid #444; padding-top: 10px; display: none; }
+        .brain-panel.show { display: block; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h3>⚡ P2PPong (гостевой Matrix)</h3>
+    <h3>🏹 P2PPong (пинбольный роутер)</h3>
     <div>
-        <button id="createBtn">Создать стрелу</button>
-        <div id="offerLink" class="link-box" style="display:none;"></div>
+        <button id="createBtn">🎯 Создать стрелу</button>
+        <button id="brainBtn">🧠 Таблица узлов</button>
     </div>
+    <div id="offerInfo" class="link-box" style="display:none;"></div>
     <div>
-        <button id="acceptBtn" style="display:none;">Принять стрелу</button>
+        <input type="text" id="uuidInput" placeholder="Вставьте ID стрелы (например, abc123)" style="display:none;">
+        <button id="acceptBtn" style="display:none;">🔗 Принять стрелу по ID</button>
     </div>
     <div id="chat"></div>
     <div>
-        <input type="text" id="messageInput" placeholder="Введи сообщение после соединения" disabled>
+        <input type="text" id="messageInput" placeholder="Сообщение после соединения" disabled>
         <button id="sendBtn" disabled>Отправить</button>
     </div>
-    <div id="status">Ожидание действий...</div>
+    <div id="status">⚡ Роутер загружен. Готов к работе.</div>
+    
+    <!-- Панель роутера (скрыта) -->
+    <div id="brainPanel" class="brain-panel">
+        <h4>📡 Узлы временных хранилищ</h4>
+        <textarea id="newNodesBulk" rows="2" placeholder="Добавить узлы вручную (по одному URL на строку)"></textarea>
+        <button id="addNodesBtn">➕ Добавить узлы</button>
+        <button id="manualScanBtn">🔍 Сканировать 10 случайных</button>
+        <button id="purgeDeadBtn">🗑 Удалить мёртвые (3 неудачи)</button>
+        <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+            <table style="width:100%; font-size:12px;">
+                <thead><tr><th>URL</th><th>score</th><th>мс</th><th>неудач</th><th>статус</th></tr></thead>
+                <tbody id="routerNodesTbody"></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 <script>
-const MATRIX_HOMESERVER = 'https://tchncs.de';
-const statusDiv = document.getElementById('status');
-const chatDiv = document.getElementById('chat');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const createBtn = document.getElementById('createBtn');
-const acceptBtn = document.getElementById('acceptBtn');
-const offerLink = document.getElementById('offerLink');
+    // ======================= ПИНБОЛЬНЫЙ РОУТЕР (ядро) =======================
+    class PinballRouter {
+        constructor() {
+            this.nodes = new Map();   // url -> { score, latency, consecutiveFailures, dead, lastSeen }
+            this.initDefaultNodes();
+            this.scanInterval = setInterval(() => this.backgroundScan(), 300000); // 5 минут
+        }
 
-let peerConnection;
-let dataChannel;
-let roomId;
-let accessToken; // гостевой токен
-let syncInterval;
+        initDefaultNodes() {
+            const defaultNodes = [
+                "https://0x0.st",
+                "https://ix.io",
+                "https://paste.rs",
+                "https://file.io",
+                "https://transfer.sh"
+            ];
+            for (const url of defaultNodes) {
+                this.addNode(url, 0.5);
+            }
+        }
 
-// ---------- Matrix-помощники (гостевой режим) ----------
-async function matrixGuestLogin() {
-    const res = await fetch(`${MATRIX_HOMESERVER}/_matrix/client/v3/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'guest' })
-    });
-    if (!res.ok) { statusDiv.textContent = 'Ошибка гостевого входа в Matrix'; return false; }
-    const data = await res.json();
-    accessToken = data.access_token;
-    return true;
-}
-
-async function matrixCreateRoom() {
-    const res = await fetch(`${MATRIX_HOMESERVER}/_matrix/client/v3/createRoom`, {
-        method: 'POST',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-            room_alias_name: `p2ppong_${Date.now()}`,
-            name: 'P2PPong Strike',
-            preset: 'public_chat'
-        })
-    });
-    if (!res.ok) { statusDiv.textContent = 'Ошибка создания комнаты'; return null; }
-    const data = await res.json();
-    return data.room_id;
-}
-
-async function matrixSendMessage(roomId, msgType, body) {
-    const txnId = Date.now() + Math.random().toString(36);
-    await fetch(`${MATRIX_HOMESERVER}/_matrix/client/v3/rooms/${roomId}/send/${msgType}/${txnId}`, {
-        method: 'PUT',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-    });
-}
-
-function matrixStartSync(roomId, onMessage) {
-    let since = '';
-    syncInterval = setInterval(async () => {
-        try {
-            const url = `${MATRIX_HOMESERVER}/_matrix/client/v3/sync?timeout=30000&since=${since}`;
-            const res = await fetch(url, {
-                headers: { 'Authorization': `Bearer ${accessToken}` }
+        addNode(url, initialScore = 0.3) {
+            url = url.trim();
+            if (!url || this.nodes.has(url)) return;
+            this.nodes.set(url, {
+                score: Math.min(1, Math.max(0, initialScore)),
+                latency: null,
+                consecutiveFailures: 0,
+                dead: false,
+                lastSeen: null
             });
-            if (!res.ok) return;
-            const data = await res.json();
-            since = data.next_batch;
-            const room = data.rooms?.join?.[roomId];
-            if (!room) return;
-            const events = room.timeline?.events || [];
-            for (const ev of events) {
-                if (ev.type === 'm.room.message' && ev.sender !== accessToken) {
-                    onMessage(ev.content.body);
+            this.log(`➕ Добавлен узел ${url} (score=${initialScore})`);
+            this.renderTable();
+        }
+
+        recordSuccess(url, responseTimeMs, responseData = null) {
+            const node = this.nodes.get(url);
+            if (!node || node.dead) return;
+            if (node.latency === null) node.latency = responseTimeMs;
+            else node.latency = 0.7 * node.latency + 0.3 * responseTimeMs;
+            node.consecutiveFailures = 0;
+            node.score = Math.min(1, node.score + 0.1);
+            node.lastSeen = Date.now();
+            node.dead = false;
+            this.log(`✅ ${url} → ${responseTimeMs}ms, score=${node.score.toFixed(2)}`);
+            this.renderTable();
+            return responseData;
+        }
+
+        recordFailure(url) {
+            const node = this.nodes.get(url);
+            if (!node || node.dead) return;
+            node.consecutiveFailures++;
+            node.score = Math.max(0.1, node.score - 0.05);
+            this.log(`❌ ${url} → неудача #${node.consecutiveFailures}`);
+            if (node.consecutiveFailures >= 3) {
+                node.dead = true;
+                this.log(`💀 Узел ${url} навсегда удалён (3 неудачи)`);
+            }
+            this.renderTable();
+        }
+
+        purgeDead() {
+            let removed = 0;
+            for (const [url, node] of this.nodes.entries()) {
+                if (node.dead) {
+                    this.nodes.delete(url);
+                    removed++;
                 }
             }
-        } catch(e) {}
-    }, 2000);
-}
+            if (removed) this.log(`🧹 Удалено мёртвых: ${removed}`);
+            this.renderTable();
+        }
 
-// ---------- WebRTC ----------
-async function createOffer() {
-    createBtn.disabled = true;
-    if (!await matrixGuestLogin()) return;
-    roomId = await matrixCreateRoom();
-    if (!roomId) return;
-
-    peerConnection = new RTCPeerConnection();
-    dataChannel = peerConnection.createDataChannel('chat');
-    setupDataChannel(dataChannel);
-
-    const offer = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offer);
-
-    await matrixSendMessage(roomId, 'm.room.message', {
-        msgtype: 'm.text',
-        body: JSON.stringify({ type: 'offer', sdp: peerConnection.localDescription })
-    });
-
-    matrixStartSync(roomId, async (msg) => {
-        try {
-            const data = JSON.parse(msg);
-            if (data.type === 'answer' && !peerConnection.currentRemoteDescription) {
-                await peerConnection.setRemoteDescription(data.sdp);
-                statusDiv.textContent = '✅ Соединение установлено!';
-            } else if (data.type === 'ice') {
-                try { await peerConnection.addIceCandidate(data.candidate); } catch(e) {}
+        getBestNodes(maxCount = 50) {
+            const alive = [];
+            for (const [url, node] of this.nodes.entries()) {
+                if (!node.dead) alive.push({ url, score: node.score, latency: node.latency ?? Infinity });
             }
-        } catch(e) {}
-    });
+            alive.sort((a,b) => b.score - a.score || a.latency - b.latency);
+            return alive.slice(0, maxCount).map(n => n.url);
+        }
 
-    const link = window.location.href + '?room=' + encodeURIComponent(roomId);
-    offerLink.style.display = 'block';
-    offerLink.innerHTML = `<strong>Отправь эту ссылку другу:</strong><br>${link}`;
-    statusDiv.textContent = 'Ожидание ответа...';
-}
-
-async function acceptOffer() {
-    const params = new URLSearchParams(window.location.search);
-    roomId = params.get('room');
-    if (!roomId) return;
-    acceptBtn.style.display = 'none';
-
-    if (!await matrixGuestLogin()) return;
-    // вступаем в комнату
-    await fetch(`${MATRIX_HOMESERVER}/_matrix/client/v3/rooms/${roomId}/join`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-    });
-
-    peerConnection = new RTCPeerConnection();
-    peerConnection.ondatachannel = (e) => {
-        dataChannel = e.channel;
-        setupDataChannel(dataChannel);
-    };
-
-    matrixStartSync(roomId, async (msg) => {
-        try {
-            const data = JSON.parse(msg);
-            if (data.type === 'offer') {
-                await peerConnection.setRemoteDescription(data.sdp);
-                const answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                await matrixSendMessage(roomId, 'm.room.message', {
-                    msgtype: 'm.text',
-                    body: JSON.stringify({ type: 'answer', sdp: peerConnection.localDescription })
+        // Загрузить текст на узел, вернуть URL скачанного файла (если удалось)
+        async uploadText(url, filename, content) {
+            const start = Date.now();
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            try {
+                const blob = new Blob([content], { type: "text/plain" });
+                const formData = new FormData();
+                formData.append("file", blob, filename);
+                const res = await fetch(url, {
+                    method: "POST",
+                    body: formData,
+                    signal: controller.signal,
+                    mode: "cors"
                 });
-            } else if (data.type === 'ice') {
-                try { await peerConnection.addIceCandidate(data.candidate); } catch(e) {}
+                clearTimeout(timeoutId);
+                if (res.ok) {
+                    const responseText = await res.text();
+                    const elapsed = Date.now() - start;
+                    this.recordSuccess(url, elapsed);
+                    // Попытаться извлечь URL файла (разные хранилища возвращают прямую ссылку)
+                    let fileUrl = responseText.trim();
+                    if (!fileUrl.startsWith("http")) {
+                        // некоторые возвращают только имя, или относительный путь
+                        if (url.endsWith("/")) fileUrl = url + fileUrl;
+                        else fileUrl = url + "/" + fileUrl;
+                    }
+                    return fileUrl;
+                } else {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+            } catch (err) {
+                clearTimeout(timeoutId);
+                this.recordFailure(url);
+                return null;
             }
-        } catch(e) {}
-    });
+        }
 
-    statusDiv.textContent = 'Ответ отправлен. Устанавливаем соединение...';
-}
+        // Скачать текст по URL
+        async downloadText(fileUrl) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 4000);
+            try {
+                const res = await fetch(fileUrl, { signal: controller.signal, mode: "cors" });
+                clearTimeout(timeoutId);
+                if (res.ok) return await res.text();
+            } catch (err) {}
+            return null;
+        }
 
-function setupDataChannel(channel) {
-    channel.onopen = () => {
-        statusDiv.textContent = '✅ Канал открыт! Можно общаться.';
-        messageInput.disabled = false;
-        sendBtn.disabled = false;
-    };
-    channel.onmessage = (e) => {
-        const msg = document.createElement('div');
-        msg.textContent = `📩 Друг: ${e.data}`;
-        chatDiv.appendChild(msg);
-    };
-}
+        // Параллельно загрузить один и тот же файл на несколько узлов
+        async broadcastFile(filename, content, maxNodes = 50) {
+            const nodes = this.getBestNodes(maxNodes);
+            if (nodes.length === 0) return [];
+            const uploadPromises = nodes.map(url => this.uploadText(url, filename, content));
+            const results = await Promise.allSettled(uploadPromises);
+            const successUrls = [];
+            for (let i = 0; i < results.length; i++) {
+                if (results[i].status === "fulfilled" && results[i].value) {
+                    successUrls.push({ nodeUrl: nodes[i], fileUrl: results[i].value });
+                }
+            }
+            return successUrls;
+        }
 
-function sendMessage() {
-    if (dataChannel && dataChannel.readyState === 'open') {
-        const text = messageInput.value.trim();
-        if (text) {
-            dataChannel.send(text);
-            const msg = document.createElement('div');
-            msg.textContent = `📤 Я: ${text}`;
-            chatDiv.appendChild(msg);
-            messageInput.value = '';
+        // Найти файл по имени на всех живых узлах (параллельно)
+        async findFile(filename, timeoutMs = 8000) {
+            const nodes = this.getBestNodes(100);
+            if (nodes.length === 0) return null;
+            const abortController = new AbortController();
+            const timer = setTimeout(() => abortController.abort(), timeoutMs);
+            const fetchPromises = nodes.map(async (nodeUrl) => {
+                // Пытаемся скачать по адресу nodeUrl/filename (разные хранилища имеют разную структуру)
+                const candidateUrl = nodeUrl.endsWith("/") ? nodeUrl + filename : nodeUrl + "/" + filename;
+                try {
+                    const res = await fetch(candidateUrl, { signal: abortController.signal, mode: "cors" });
+                    if (res.ok) {
+                        const content = await res.text();
+                        return { url: nodeUrl, content };
+                    }
+                } catch (e) {}
+                return null;
+            });
+            const raceResult = await Promise.any(fetchPromises.map(p => p.then(r => r ? Promise.resolve(r) : Promise.reject())));
+            clearTimeout(timer);
+            return raceResult;
+        }
+
+        async backgroundScan() {
+            const toScan = this.getBestNodes(20).filter(url => {
+                const n = this.nodes.get(url);
+                return !n?.dead && (!n?.lastSeen || Date.now() - n.lastSeen > 30000);
+            });
+            if (toScan.length === 0) return;
+            this.log(`🔍 Фоновое сканирование ${toScan.length} узлов...`);
+            for (const url of toScan) {
+                await this.uploadText(url, "ping.txt", "ping_" + Date.now()).catch(()=>{});
+                await new Promise(r => setTimeout(r, 100));
+            }
+            this.purgeDead();
+        }
+
+        manualScan(count = 10) {
+            const nodes = this.getBestNodes(100).slice(0, count);
+            nodes.forEach(url => {
+                this.uploadText(url, "ping.txt", "ping_" + Date.now()).catch(()=>{});
+            });
+        }
+
+        log(msg) {
+            const statusDiv = document.getElementById('status');
+            if (statusDiv) {
+                const p = document.createElement('div');
+                p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+                statusDiv.appendChild(p);
+                setTimeout(() => p.remove(), 10000);
+            }
+            console.log(msg);
+        }
+
+        renderTable() {
+            const tbody = document.getElementById('routerNodesTbody');
+            if (!tbody) return;
+            tbody.innerHTML = '';
+            const sorted = Array.from(this.nodes.entries()).sort((a,b) => b[1].score - a[1].score);
+            for (const [url, node] of sorted) {
+                const row = tbody.insertRow();
+                row.insertCell(0).textContent = url.substring(0, 40);
+                row.insertCell(1).textContent = node.dead ? 'dead' : node.score.toFixed(2);
+                row.insertCell(2).textContent = node.latency ? Math.round(node.latency) : '—';
+                row.insertCell(3).textContent = node.consecutiveFailures;
+                row.insertCell(4).innerHTML = node.dead ? '<span style="color:#666;">мёртв</span>' : (node.latency ? '🟢 жив' : '⚪ нов');
+                if (node.dead) row.style.opacity = '0.4';
+            }
         }
     }
-}
 
-createBtn.addEventListener('click', createOffer);
-sendBtn.addEventListener('click', sendMessage);
+    // ======================= WEBRTC + РОУТЕР =======================
+    const router = new PinballRouter();
+    let peerConnection = null;
+    let dataChannel = null;
+    let currentUUID = null;
+    let pollingInterval = null;
 
-if (window.location.search.includes('room=')) {
-    acceptBtn.style.display = 'block';
-    statusDiv.textContent = 'Нажми "Принять стрелу" для подключения.';
-    acceptBtn.addEventListener('click', acceptOffer);
-}
+    const statusDiv = document.getElementById('status');
+    const chatDiv = document.getElementById('chat');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const createBtn = document.getElementById('createBtn');
+    const acceptBtn = document.getElementById('acceptBtn');
+    const uuidInput = document.getElementById('uuidInput');
+    const offerInfoDiv = document.getElementById('offerInfo');
+    const brainBtn = document.getElementById('brainBtn');
+    const brainPanel = document.getElementById('brainPanel');
+    const newNodesBulk = document.getElementById('newNodesBulk');
+    const addNodesBtn = document.getElementById('addNodesBtn');
+    const manualScanBtn = document.getElementById('manualScanBtn');
+    const purgeDeadBtn = document.getElementById('purgeDeadBtn');
+
+    // Генерация короткого ID
+    function generateUUID() {
+        return Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+    }
+
+    // Настройка data channel
+    function setupDataChannel(channel) {
+        channel.onopen = () => {
+            statusDiv.innerHTML = '✅ Канал открыт! Можно общаться.';
+            messageInput.disabled = false;
+            sendBtn.disabled = false;
+        };
+        channel.onmessage = (e) => {
+            const msgDiv = document.createElement('div');
+            msgDiv.textContent = `📩 Друг: ${e.data}`;
+            chatDiv.appendChild(msgDiv);
+            chatDiv.scrollTop = chatDiv.scrollHeight;
+        };
+        channel.onclose = () => {
+            statusDiv.innerHTML = '⚠️ Канал закрыт.';
+            messageInput.disabled = true;
+            sendBtn.disabled = true;
+        };
+    }
+
+    // Создание offer (инициатор)
+    async function createOffer() {
+        createBtn.disabled = true;
+        statusDiv.innerHTML = '🔄 Генерируем WebRTC offer...';
+        
+        peerConnection = new RTCPeerConnection();
+        dataChannel = peerConnection.createDataChannel('chat');
+        setupDataChannel(dataChannel);
+        
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        const sdpOffer = peerConnection.localDescription.sdp;
+        
+        const uuid = generateUUID();
+        currentUUID = uuid;
+        const filename = `p2p_${uuid}.offer.txt`;
+        
+        statusDiv.innerHTML = `📤 Загружаем SDP offer на временные хранилища (${router.getBestNodes(50).length} узлов)...`;
+        const uploadResults = await router.broadcastFile(filename, sdpOffer, 50);
+        
+        if (uploadResults.length === 0) {
+            statusDiv.innerHTML = '❌ Не удалось разместить offer ни на одном узле. Попробуйте позже.';
+            createBtn.disabled = false;
+            return;
+        }
+        
+        // Показываем ID и ссылки для ручного копирования (запасной вариант)
+        const shortLinks = uploadResults.map(r => r.fileUrl).join('\n');
+        offerInfoDiv.style.display = 'block';
+        offerInfoDiv.innerHTML = `<strong>🎯 ID стрелы:</strong> <code style="background:#333; padding:4px;">${uuid}</code><br>
+                                  <strong>📋 Отправьте этот ID другу любым способом (мессенджер, SMS, устно).</strong><br>
+                                  <small>Файлы размещены на ${uploadResults.length} хранилищах. Друг вставит ID и автоматически найдёт offer.</small><br>
+                                  <button id="copyUuidBtn" style="margin-top:8px;">📋 Скопировать ID</button>`;
+        document.getElementById('copyUuidBtn')?.addEventListener('click', () => {
+            navigator.clipboard.writeText(uuid);
+            statusDiv.innerHTML = '✅ ID скопирован в буфер.';
+        });
+        
+        statusDiv.innerHTML = `✅ Offer размещён. Ожидаем ответа от друга... (ID: ${uuid})`;
+        
+        // Начинаем polling на всех узлах, куда загрузили offer, ищем файл answer
+        const answerFilename = `p2p_${uuid}.answer.txt`;
+        const answerUrls = uploadResults.map(r => r.fileUrl.replace(/\.offer\.txt$/, '.answer.txt'));
+        
+        pollingInterval = setInterval(async () => {
+            for (const ansUrl of answerUrls) {
+                const answerSdp = await router.downloadText(ansUrl);
+                if (answerSdp && answerSdp.startsWith('v=')) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    statusDiv.innerHTML = '📡 Получен SDP answer, устанавливаем соединение...';
+                    try {
+                        await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+                        statusDiv.innerHTML = '✅ WebRTC соединение установлено!';
+                    } catch (e) {
+                        statusDiv.innerHTML = `❌ Ошибка установки соединения: ${e.message}`;
+                    }
+                    return;
+                }
+            }
+        }, 2000);
+        
+        // Таймаут 60 секунд
+        setTimeout(() => {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+                statusDiv.innerHTML = '⏱️ Таймаут ожидания ответа. Попросите друга ввести ID вручную.';
+                createBtn.disabled = false;
+            }
+        }, 60000);
+    }
+    
+    // Принять стрелу по ID (получатель)
+    async function acceptOfferById() {
+        const uuid = uuidInput.value.trim();
+        if (!uuid) {
+            statusDiv.innerHTML = '❌ Введите ID стрелы.';
+            return;
+        }
+        acceptBtn.disabled = true;
+        statusDiv.innerHTML = `🔍 Ищем offer с ID ${uuid} среди всех узлов...`;
+        
+        const offerFilename = `p2p_${uuid}.offer.txt`;
+        const found = await router.findFile(offerFilename, 10000);
+        if (!found || !found.content) {
+            statusDiv.innerHTML = '❌ Не удалось найти offer. Возможно, истекло время или неправильный ID.';
+            acceptBtn.disabled = false;
+            return;
+        }
+        
+        const offerSdp = found.content;
+        statusDiv.innerHTML = '✅ Offer найден, создаём WebRTC ответ...';
+        
+        peerConnection = new RTCPeerConnection();
+        peerConnection.ondatachannel = (e) => {
+            dataChannel = e.channel;
+            setupDataChannel(dataChannel);
+        };
+        
+        try {
+            await peerConnection.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+            const answer = await peerConnection.createAnswer();
+            await peerConnection.setLocalDescription(answer);
+            const answerSdp = peerConnection.localDescription.sdp;
+            
+            // Загружаем answer на те же узлы (находим подходящие URL из того же хранилища)
+            // Проще: берём URL узла, с которого скачали offer, и загружаем туда answer
+            const baseNode = found.url;
+            const answerFilename = `p2p_${uuid}.answer.txt`;
+            const uploadedUrl = await router.uploadText(baseNode, answerFilename, answerSdp);
+            if (uploadedUrl) {
+                statusDiv.innerHTML = `✅ Ответ отправлен на узел ${baseNode}. Ожидаем соединения...`;
+            } else {
+                statusDiv.innerHTML = '⚠️ Не удалось отправить ответ, но попытка установить соединение продолжается...';
+            }
+            // Канал откроется автоматически
+        } catch (err) {
+            statusDiv.innerHTML = `❌ Ошибка WebRTC: ${err.message}`;
+            acceptBtn.disabled = false;
+        }
+    }
+    
+    function sendMessage() {
+        if (dataChannel && dataChannel.readyState === 'open') {
+            const text = messageInput.value.trim();
+            if (text) {
+                dataChannel.send(text);
+                const msgDiv = document.createElement('div');
+                msgDiv.textContent = `📤 Я: ${text}`;
+                chatDiv.appendChild(msgDiv);
+                messageInput.value = '';
+                chatDiv.scrollTop = chatDiv.scrollHeight;
+            }
+        } else {
+            statusDiv.innerHTML = '⚠️ Канал ещё не открыт.';
+        }
+    }
+    
+    // UI события
+    createBtn.addEventListener('click', createOffer);
+    sendBtn.addEventListener('click', sendMessage);
+    acceptBtn.addEventListener('click', acceptOfferById);
+    
+    brainBtn.addEventListener('click', () => {
+        brainPanel.classList.toggle('show');
+        router.renderTable();
+    });
+    addNodesBtn.addEventListener('click', () => {
+        const raw = newNodesBulk.value;
+        const urls = raw.split(/\r?\n/).filter(s => s.trim());
+        for (const url of urls) router.addNode(url, 0.5);
+        router.renderTable();
+    });
+    manualScanBtn.addEventListener('click', () => {
+        router.manualScan(10);
+        statusDiv.innerHTML = '🔍 Запущено ручное сканирование (результаты в таблице)';
+    });
+    purgeDeadBtn.addEventListener('click', () => {
+        router.purgeDead();
+        statusDiv.innerHTML = '🗑 Мёртвые узлы удалены.';
+    });
+    
+    // Показываем поле ввода ID при необходимости
+    const showAcceptUI = () => {
+        uuidInput.style.display = 'block';
+        acceptBtn.style.display = 'block';
+        statusDiv.innerHTML = 'Введите ID стрелы, полученный от друга, и нажмите "Принять".';
+    };
+    // Если в URL есть параметр ?id=... можно автоматически заполнить
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlId = urlParams.get('id');
+    if (urlId) {
+        uuidInput.value = urlId;
+        showAcceptUI();
+    } else {
+        // По кнопке можно показать вручную
+        const manualAcceptBtn = document.createElement('button');
+        manualAcceptBtn.textContent = '🔌 Принять стрелу по ID';
+        manualAcceptBtn.style.background = '#1565C0';
+        manualAcceptBtn.onclick = showAcceptUI;
+        document.querySelector('div:first-of-type div').appendChild(manualAcceptBtn);
+    }
+    
+    // Инициализация таблицы
+    router.renderTable();
+    statusDiv.innerHTML = '⚡ Роутер активен. Нажмите "Создать стрелу", чтобы начать.';
 </script>
 </body>
 </html>
