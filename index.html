@@ -8,49 +8,24 @@
         html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
         body { display: flex; justify-content: center; align-items: center; }
         .container { width: 100%; max-width: 600px; padding: 20px; box-sizing: border-box; }
-        button { padding: 10px 16px; margin: 5px; background: #2E7D32; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 16px; }
-        button:hover { background: #388E3C; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
-        input { width: 100%; padding: 10px; margin: 8px 0; background: #1e1e1e; border: 1px solid #444; color: white; border-radius: 6px; font-size: 16px; box-sizing: border-box; }
-        #chat { border: 1px solid #333; min-height: 200px; max-height: 50vh; overflow-y: auto; padding: 10px; margin: 10px 0; background: #1a1a1a; border-radius: 6px; }
         #status { color: #888; font-size: 0.9em; margin: 5px 0; }
-        .link-box { word-break: break-all; background: #1e1e1e; padding: 10px; border: 1px solid #444; border-radius: 6px; margin: 10px 0; font-size: 0.9em; }
     </style>
 </head>
 <body>
 <div class="container">
-    <h3>⚡ P2PPong — надёжная стрела</h3>
-    <div>
-        <button id="createBtn">Создать стрелу</button>
-        <div id="offerLink" class="link-box" style="display:none;"></div>
-    </div>
-    <div>
-        <button id="acceptBtn" style="display:none;">Принять стрелу</button>
-    </div>
-    <div id="chat"></div>
-    <div>
-        <input type="text" id="messageInput" placeholder="Введи сообщение после соединения" disabled>
-        <button id="sendBtn" disabled>Отправить</button>
-    </div>
-    <div id="status">Ожидание действий...</div>
+    <h3>⚡ P2PPong — арбитр</h3>
+    <div id="status">Запуск...</div>
 </div>
 
 <script>
 const RENDER_SERVER = 'https://p2ppong.onrender.com';
 const statusDiv = document.getElementById('status');
-const chatDiv = document.getElementById('chat');
-const messageInput = document.getElementById('messageInput');
-const sendBtn = document.getElementById('sendBtn');
-const createBtn = document.getElementById('createBtn');
-const acceptBtn = document.getElementById('acceptBtn');
-const offerLink = document.getElementById('offerLink');
 
 let peerConnection;
 let dataChannel;
 let sessionId;
-let waitingForAnswer = false;
-let waitingForOffer = false;
 let pollingInterval;
+let parentOrigin = '*'; // Принимаем сообщения от любого родителя
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 function generateUUID() {
@@ -59,7 +34,7 @@ function generateUUID() {
 
 async function postToServer(payload) {
     const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 80000); // запас для пробуждения Render
+    const to = setTimeout(() => ctrl.abort(), 80000);
     try {
         const res = await fetch(RENDER_SERVER + '/offer', {
             method: 'POST',
@@ -91,63 +66,46 @@ async function getFromServer(sessionId) {
     return null;
 }
 
-function setupDataChannel(channel) {
-    channel.onopen = () => {
-        statusDiv.textContent = '✅ Канал открыт! Можно общаться.';
-        messageInput.disabled = false;
-        sendBtn.disabled = false;
-    };
-    channel.onmessage = (e) => {
-        const msg = document.createElement('div');
-        msg.textContent = `📩 Друг: ${e.data}`;
-        chatDiv.appendChild(msg);
-    };
+function sendToParent(msg) {
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+    }
 }
 
-// ========== СОЗДАНИЕ СТРЕЛЫ (Робин А) ==========
-async function createOffer() {
-    createBtn.disabled = true;
-    statusDiv.textContent = 'Создаю приглашение...';
+// ========== ПРОВЕРКА RENDER ==========
+async function checkRender() {
+    try {
+        const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 5000);
+        await fetch(RENDER_SERVER + '/offer?id=ping', { signal: ctrl.signal });
+        clearTimeout(to);
+    } catch(e) {}
+    // Render ответил (даже 404 — значит жив)
+    statusDiv.textContent = 'Понг готов';
+    sendToParent({ type: 'pong-ready' });
+}
+
+// ========== СОЗДАНИЕ СЕССИИ (Робин А) ==========
+async function createSession() {
+    statusDiv.textContent = 'Создаю сессию...';
     
     sessionId = generateUUID();
-    const link = window.location.href + '?id=' + sessionId;
-    offerLink.style.display = 'block';
-    offerLink.innerHTML = `<strong>Отправь эту ссылку другу:</strong><br>${link}`;
-    statusDiv.textContent = 'Ссылка готова. Ожидаю подключения друга...';
+    const link = window.location.origin + window.location.pathname + '?id=' + sessionId;
     
-    // Начинаем опрос: ждём, пока получатель отправит сигнал готовности
-    waitingForOffer = false;
-    startPollingForRecipient();
-}
-
-function startPollingForRecipient() {
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(async () => {
-        const data = await getFromServer(sessionId);
-        if (data && data.status === 'ready') {
-            // Получатель отметился, создаём WebRTC offer
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-            await createAndSendOffer();
-        }
-    }, 2000);
+    // Отправляем ссылку RobinHood'у
+    sendToParent({ type: 'link', link: link });
+    sendToParent({ type: 'status', text: 'Ожидаю получателя...', duration: 0 });
     
-    // Таймаут ожидания получателя
-    setTimeout(() => {
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-            if (!peerConnection) {
-                statusDiv.textContent = 'Таймаут: получатель не открыл ссылку за 90 секунд.';
-                createBtn.disabled = false;
-            }
-        }
-    }, 90000);
-}
-
-async function createAndSendOffer() {
-    statusDiv.textContent = 'Получатель готов. Создаю защищённый канал...';
+    // Ждём ready от получателя
+    const ready = await waitForReady();
+    if (!ready) {
+        sendToParent({ type: 'error', text: 'Таймаут: получатель не открыл ссылку.' });
+        return;
+    }
     
+    sendToParent({ type: 'status', text: 'Получатель готов. Создаю канал...', duration: 0 });
+    
+    // Создаём WebRTC offer
     peerConnection = new RTCPeerConnection();
     dataChannel = peerConnection.createDataChannel('chat');
     setupDataChannel(dataChannel);
@@ -155,137 +113,159 @@ async function createAndSendOffer() {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
     
-    // Ждём сбора ICE-кандидатов
-    await new Promise(resolve => {
-        if (peerConnection.iceGatheringState === 'complete') resolve();
-        else peerConnection.addEventListener('icegatheringstatechange', () => {
-            if (peerConnection.iceGatheringState === 'complete') resolve();
-        });
-    });
+    await waitForIceComplete();
     
-    // Отправляем offer на Render
-    const sent = await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
-    if (!sent) {
-        statusDiv.textContent = 'Ошибка отправки offer. Попробуйте позже.';
-        createBtn.disabled = false;
+    await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
+    
+    sendToParent({ type: 'status', text: 'Жду ответа...', duration: 0 });
+    
+    // Ждём answer
+    const answerSdp = await waitForAnswer();
+    if (!answerSdp) {
+        sendToParent({ type: 'error', text: 'Таймаут ответа.' });
         return;
     }
     
-    statusDiv.textContent = 'Канал отправлен. Жду ответа...';
-    startPollingForAnswer();
+    await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+    sendToParent({ type: 'channel-open' });
 }
 
-function startPollingForAnswer() {
-    waitingForAnswer = true;
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(async () => {
-        if (!waitingForAnswer) return;
+async function waitForReady() {
+    const startTime = Date.now();
+    while (Date.now() - startTime < 90000) {
         const data = await getFromServer(sessionId);
-        if (data && data.sdp && data.sdp !== peerConnection.localDescription.sdp) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-            waitingForAnswer = false;
-            try {
-                await peerConnection.setRemoteDescription({ type: 'answer', sdp: data.sdp });
-                statusDiv.textContent = '✅ Канал открыт!';
-            } catch(e) {
-                statusDiv.textContent = 'Ошибка установки соединения.';
-                createBtn.disabled = false;
-            }
-        }
-    }, 2000);
+        if (data && data.status === 'ready') return true;
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    return false;
 }
 
-// ========== ПРИНЯТИЕ СТРЕЛЫ (Робин Б) ==========
-async function acceptOffer() {
-    const params = new URLSearchParams(window.location.search);
-    sessionId = params.get('id');
-    if (!sessionId) return;
+async function waitForAnswer() {
+    const startTime = Date.now();
+    while (Date.now() - startTime < 90000) {
+        const data = await getFromServer(sessionId);
+        if (data && data.sdp && data.sdp !== peerConnection.localDescription.sdp) return data.sdp;
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    return null;
+}
+
+// ========== ПРИНЯТИЕ СЕССИИ (Робин Б) ==========
+async function acceptSession(id) {
+    sessionId = id;
+    statusDiv.textContent = 'Принимаю сессию...';
     
-    acceptBtn.style.display = 'none';
-    statusDiv.textContent = 'Подключаюсь...';
+    sendToParent({ type: 'status', text: 'Подключаюсь...', duration: 0 });
     
-    // Отправляем сигнал "я здесь"
-    const sent = await postToServer({ status: 'ready', sessionId: sessionId });
-    if (!sent) {
-        statusDiv.textContent = 'Сервер не отвечает. Попробуйте позже.';
+    // Отправляем ready
+    await postToServer({ status: 'ready', sessionId: sessionId });
+    
+    sendToParent({ type: 'status', text: 'Жду offer...', duration: 0 });
+    
+    // Ждём offer
+    const offerSdp = await waitForOffer();
+    if (!offerSdp) {
+        sendToParent({ type: 'error', text: 'Таймаут: создатель не ответил.' });
         return;
     }
     
-    statusDiv.textContent = 'Ожидаю offer от создателя...';
-    startPollingForOffer();
-}
-
-function startPollingForOffer() {
-    waitingForOffer = true;
-    if (pollingInterval) clearInterval(pollingInterval);
-    pollingInterval = setInterval(async () => {
-        if (!waitingForOffer) return;
-        const data = await getFromServer(sessionId);
-        if (data && data.sdp) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-            waitingForOffer = false;
-            await handleReceivedOffer(data.sdp);
-        }
-    }, 2000);
-}
-
-async function handleReceivedOffer(offerSdp) {
+    sendToParent({ type: 'status', text: 'Создаю ответ...', duration: 0 });
+    
     peerConnection = new RTCPeerConnection();
     peerConnection.ondatachannel = (e) => {
         dataChannel = e.channel;
         setupDataChannel(dataChannel);
     };
     
-    try {
-        await peerConnection.setRemoteDescription({ type: 'offer', sdp: offerSdp });
-    } catch(e) {
-        statusDiv.textContent = 'Ошибка offer: ' + e.message;
-        return;
-    }
-    
+    await peerConnection.setRemoteDescription({ type: 'offer', sdp: offerSdp });
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
     
-    // Ждём сбора ICE-кандидатов
-    await new Promise(resolve => {
+    await waitForIceComplete();
+    
+    await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
+    sendToParent({ type: 'channel-open' });
+}
+
+async function waitForOffer() {
+    const startTime = Date.now();
+    while (Date.now() - startTime < 90000) {
+        const data = await getFromServer(sessionId);
+        if (data && data.sdp) return data.sdp;
+        await new Promise(r => setTimeout(r, 2000));
+    }
+    return null;
+}
+
+// ========== ОБЩИЙ КОД ==========
+function setupDataChannel(channel) {
+    channel.onopen = () => {
+        statusDiv.textContent = 'Канал открыт';
+    };
+    channel.onmessage = (e) => {
+        // Пересылаем сообщение RobinHood'у
+        sendToParent({ type: 'message', text: e.data, sender: 'Друг' });
+    };
+}
+
+async function waitForIceComplete() {
+    return new Promise(resolve => {
         if (peerConnection.iceGatheringState === 'complete') resolve();
         else peerConnection.addEventListener('icegatheringstatechange', () => {
             if (peerConnection.iceGatheringState === 'complete') resolve();
         });
     });
+}
+
+// ========== СЛУШАЕМ КОМАНДЫ ОТ ROBINHOOD ==========
+window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || !data.action) return;
     
-    // Отправляем answer на Render
-    const sent = await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
-    if (sent) {
-        statusDiv.textContent = 'Ответ отправлен. Канал устанавливается...';
-    } else {
-        statusDiv.textContent = 'Ошибка отправки ответа.';
+    switch(data.action) {
+        case 'create':
+            createSession();
+            break;
+        case 'accept':
+            acceptSession(data.id);
+            break;
+        case 'send':
+            if (dataChannel && dataChannel.readyState === 'open') {
+                dataChannel.send(data.text);
+            }
+            break;
+        case 'manual-sdp':
+            handleManualSdp(data.sdp);
+            break;
     }
-}
+});
 
-function sendMessage() {
-    if (dataChannel && dataChannel.readyState === 'open') {
-        const text = messageInput.value.trim();
-        if (text) {
-            dataChannel.send(text);
-            const msg = document.createElement('div');
-            msg.textContent = `📤 Я: ${text}`;
-            chatDiv.appendChild(msg);
-            messageInput.value = '';
+async function handleManualSdp(sdpText) {
+    try {
+        const sdpObj = JSON.parse(sdpText);
+        const pc = new RTCPeerConnection();
+        if (sdpObj.type === 'offer') {
+            pc.ondatachannel = (e) => {
+                dataChannel = e.channel;
+                setupDataChannel(dataChannel);
+            };
+            await pc.setRemoteDescription(sdpObj);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            sendToParent({ type: 'status', text: 'Ответ готов: ' + JSON.stringify(pc.localDescription), duration: 10000 });
+        } else {
+            dataChannel = pc.createDataChannel('chat');
+            setupDataChannel(dataChannel);
+            await pc.setRemoteDescription(sdpObj);
+            sendToParent({ type: 'channel-open' });
         }
+    } catch(e) {
+        sendToParent({ type: 'error', text: 'Ошибка SDP: ' + e.message });
     }
 }
 
-createBtn.addEventListener('click', createOffer);
-sendBtn.addEventListener('click', sendMessage);
-
-if (window.location.search.includes('id=')) {
-    acceptBtn.style.display = 'block';
-    statusDiv.textContent = 'Нажми "Принять стрелу" для подключения.';
-    acceptBtn.addEventListener('click', acceptOffer);
-}
+// ========== ЗАПУСК ==========
+checkRender();
 </script>
 </body>
 </html>
