@@ -24,44 +24,33 @@ const statusDiv = document.getElementById('status');
 let peerConnection;
 let dataChannel;
 let sessionId;
+let myRole = null; // 'creator' или 'receiver'
+let parentOrigin = '*';
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 function generateUUID() {
     return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2, 15);
 }
 
-async function postToServer(payload) {
+async function apiCall(method, path, body = null) {
     const ctrl = new AbortController();
     const to = setTimeout(() => ctrl.abort(), 80000);
     try {
-        const res = await fetch(RENDER_SERVER + '/offer', {
-            method: 'POST',
+        const options = {
+            method: method,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
             signal: ctrl.signal
-        });
+        };
+        if (body) options.body = JSON.stringify(body);
+        
+        const res = await fetch(RENDER_SERVER + path, options);
         clearTimeout(to);
-        return res.ok;
+        if (res.ok) return await res.json();
+        return null;
     } catch(e) {
         clearTimeout(to);
-        return false;
+        return null;
     }
-}
-
-async function getFromServer(sessionId) {
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 4000);
-    try {
-        const res = await fetch(RENDER_SERVER + '/offer?id=' + sessionId, { signal: ctrl.signal });
-        clearTimeout(to);
-        if (res.ok) {
-            const data = await res.json();
-            return data;
-        }
-    } catch(e) {
-        clearTimeout(to);
-    }
-    return null;
 }
 
 function sendToParent(msg) {
@@ -73,36 +62,44 @@ function sendToParent(msg) {
 // ========== ПРОВЕРКА RENDER ==========
 async function checkRender() {
     statusDiv.textContent = 'Проверяю сервер...';
-    try {
-        const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), 5000);
-        await fetch(RENDER_SERVER + '/offer?id=ping', { signal: ctrl.signal });
-        clearTimeout(to);
-    } catch(e) {}
-    statusDiv.textContent = 'Понг готов';
-    sendToParent({ type: 'pong-ready' });
+    const ping = await apiCall('GET', '/ping');
+    if (ping) {
+        statusDiv.textContent = 'Понг готов';
+        sendToParent({ type: 'pong-ready' });
+    } else {
+        statusDiv.textContent = 'Сервер не отвечает';
+        setTimeout(checkRender, 5000);
+    }
 }
 
 // ========== СОЗДАНИЕ СЕССИИ (личность А) ==========
 async function createSession() {
     statusDiv.textContent = 'Создаю сессию...';
+    myRole = 'creator';
     
     sessionId = generateUUID();
     
-    // Возвращаем RobinHood только sessionId, ссылку он соберёт сам
+    // Шаг 1: Создаём сессию на Render
+    const sessionRes = await apiCall('POST', '/session', { sessionId: sessionId, role: 'creator' });
+    if (!sessionRes) {
+        sendToParent({ type: 'error', text: 'Сервер не отвечает.' });
+        return;
+    }
+    
+    // Отдаём sessionId RobinHood'у
     sendToParent({ type: 'session-created', sessionId: sessionId });
     sendToParent({ type: 'status', text: 'Ожидаю получателя...', duration: 0 });
     
-    // Ждём ready от получателя
-    const ready = await waitForReady();
-    if (!ready) {
-        sendToParent({ type: 'error', text: 'Таймаут: получатель не открыл ссылку.' });
+    // Шаг 2: Ждём получателя (опрашиваем /session пока не matched)
+    const matched = await waitForMatch();
+    if (!matched) {
+        sendToParent({ type: 'error', text: 'Таймаут: получатель не появился.' });
         return;
     }
     
     sendToParent({ type: 'status', text: 'Получатель готов. Создаю канал...', duration: 0 });
     
-    // Создаём WebRTC offer
+    // Шаг 3: Создаём WebRTC offer
     peerConnection = new RTCPeerConnection();
     dataChannel = peerConnection.createDataChannel('chat');
     setupDataChannel(dataChannel);
@@ -112,11 +109,12 @@ async function createSession() {
     
     await waitForIceComplete();
     
-    await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
+    // Шаг 4: Отправляем offer на Render
+    await apiCall('POST', '/offer', { sessionId: sessionId, sdp: peerConnection.localDescription.sdp });
     
     sendToParent({ type: 'status', text: 'Жду ответа...', duration: 0 });
     
-    // Ждём answer
+    // Шаг 5: Ждём answer
     const answerSdp = await waitForAnswer();
     if (!answerSdp) {
         sendToParent({ type: 'error', text: 'Таймаут ответа.' });
@@ -127,11 +125,11 @@ async function createSession() {
     sendToParent({ type: 'channel-open' });
 }
 
-async function waitForReady() {
+async function waitForMatch() {
     const startTime = Date.now();
     while (Date.now() - startTime < 90000) {
-        const data = await getFromServer(sessionId);
-        if (data && data.status === 'ready') return true;
+        const res = await apiCall('GET', '/session?id=' + sessionId);
+        if (res && res.status === 'matched') return true;
         await new Promise(r => setTimeout(r, 2000));
     }
     return false;
@@ -140,8 +138,8 @@ async function waitForReady() {
 async function waitForAnswer() {
     const startTime = Date.now();
     while (Date.now() - startTime < 90000) {
-        const data = await getFromServer(sessionId);
-        if (data && data.sdp && data.sdp !== peerConnection.localDescription.sdp) return data.sdp;
+        const res = await apiCall('GET', '/answer?id=' + sessionId);
+        if (res && res.sdp) return res.sdp;
         await new Promise(r => setTimeout(r, 2000));
     }
     return null;
@@ -150,16 +148,21 @@ async function waitForAnswer() {
 // ========== ПРИНЯТИЕ СЕССИИ (личность Б) ==========
 async function acceptSession(id) {
     sessionId = id;
+    myRole = 'receiver';
     statusDiv.textContent = 'Принимаю сессию: ' + id.slice(0, 8) + '...';
     
     sendToParent({ type: 'status', text: 'Подключаюсь...', duration: 0 });
     
-    // Отправляем ready
-    await postToServer({ status: 'ready', sessionId: sessionId });
+    // Шаг 1: Отмечаемся как получатель
+    const sessionRes = await apiCall('POST', '/session', { sessionId: sessionId, role: 'receiver' });
+    if (!sessionRes) {
+        sendToParent({ type: 'error', text: 'Сервер не отвечает.' });
+        return;
+    }
     
     sendToParent({ type: 'status', text: 'Жду offer...', duration: 0 });
     
-    // Ждём offer
+    // Шаг 2: Ждём offer
     const offerSdp = await waitForOffer();
     if (!offerSdp) {
         sendToParent({ type: 'error', text: 'Таймаут: создатель не ответил.' });
@@ -168,6 +171,7 @@ async function acceptSession(id) {
     
     sendToParent({ type: 'status', text: 'Создаю ответ...', duration: 0 });
     
+    // Шаг 3: Создаём answer
     peerConnection = new RTCPeerConnection();
     peerConnection.ondatachannel = (e) => {
         dataChannel = e.channel;
@@ -180,15 +184,16 @@ async function acceptSession(id) {
     
     await waitForIceComplete();
     
-    await postToServer({ sdp: peerConnection.localDescription.sdp, sessionId: sessionId });
+    // Шаг 4: Отправляем answer
+    await apiCall('POST', '/answer', { sessionId: sessionId, sdp: peerConnection.localDescription.sdp });
     sendToParent({ type: 'channel-open' });
 }
 
 async function waitForOffer() {
     const startTime = Date.now();
     while (Date.now() - startTime < 90000) {
-        const data = await getFromServer(sessionId);
-        if (data && data.sdp) return data.sdp;
+        const res = await apiCall('GET', '/offer?id=' + sessionId);
+        if (res && res.sdp) return res.sdp;
         await new Promise(r => setTimeout(r, 2000));
     }
     return null;
@@ -200,7 +205,6 @@ function setupDataChannel(channel) {
         statusDiv.textContent = 'Канал открыт';
     };
     channel.onmessage = (e) => {
-        // Пересылаем сообщение RobinHood'у
         sendToParent({ type: 'message', text: e.data, sender: 'Друг' });
     };
 }
