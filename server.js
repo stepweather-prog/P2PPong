@@ -74,6 +74,27 @@ function handleSession(req, res, body) {
     res.end(JSON.stringify({ status: matched ? 'matched' : 'waiting' }));
 }
 
+// Получение статуса сессии
+function handleGetSession(req, res, sessionId) {
+    if (!sessionId) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'sessionId required' }));
+        return;
+    }
+    
+    if (!sessions[sessionId]) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'waiting' }));
+        return;
+    }
+    
+    touchSession(sessionId);
+    const matched = sessions[sessionId].creatorReady && sessions[sessionId].receiverReady;
+    
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: matched ? 'matched' : 'waiting' }));
+}
+
 // Отправка offer
 function handleOffer(req, res, body) {
     const { sessionId, sdp } = body;
@@ -106,8 +127,8 @@ function handleGetOffer(req, res, sessionId) {
     }
     
     if (!sessions[sessionId]) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'session not found' }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'waiting' }));
         return;
     }
     
@@ -154,8 +175,8 @@ function handleGetAnswer(req, res, sessionId) {
     }
     
     if (!sessions[sessionId]) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'session not found' }));
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'waiting' }));
         return;
     }
     
@@ -212,6 +233,8 @@ const server = http.createServer((req, res) => {
         // Роутинг
         if (req.method === 'POST' && path === '/session') {
             handleSession(req, res, parsedBody);
+        } else if (req.method === 'GET' && path === '/session') {
+            handleGetSession(req, res, params.get('id'));
         } else if (req.method === 'POST' && path === '/offer') {
             handleOffer(req, res, parsedBody);
         } else if (req.method === 'GET' && path === '/offer') {
