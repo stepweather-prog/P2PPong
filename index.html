@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>P2PPong — надёжная стрела</title>
+    <title>P2PPong — арбитр</title>
     <style>
         html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
         body { display: flex; justify-content: center; align-items: center; }
@@ -24,8 +24,6 @@ const statusDiv = document.getElementById('status');
 let peerConnection;
 let dataChannel;
 let sessionId;
-let pollingInterval;
-let parentOrigin = '*'; // Принимаем сообщения от любого родителя
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 function generateUUID() {
@@ -74,26 +72,25 @@ function sendToParent(msg) {
 
 // ========== ПРОВЕРКА RENDER ==========
 async function checkRender() {
+    statusDiv.textContent = 'Проверяю сервер...';
     try {
         const ctrl = new AbortController();
         const to = setTimeout(() => ctrl.abort(), 5000);
         await fetch(RENDER_SERVER + '/offer?id=ping', { signal: ctrl.signal });
         clearTimeout(to);
     } catch(e) {}
-    // Render ответил (даже 404 — значит жив)
     statusDiv.textContent = 'Понг готов';
     sendToParent({ type: 'pong-ready' });
 }
 
-// ========== СОЗДАНИЕ СЕССИИ (Робин А) ==========
+// ========== СОЗДАНИЕ СЕССИИ (личность А) ==========
 async function createSession() {
     statusDiv.textContent = 'Создаю сессию...';
     
     sessionId = generateUUID();
-    const link = window.location.origin + window.location.pathname + '?id=' + sessionId;
     
-    // Отправляем ссылку RobinHood'у
-    sendToParent({ type: 'link', link: link });
+    // Возвращаем RobinHood только sessionId, ссылку он соберёт сам
+    sendToParent({ type: 'session-created', sessionId: sessionId });
     sendToParent({ type: 'status', text: 'Ожидаю получателя...', duration: 0 });
     
     // Ждём ready от получателя
@@ -150,10 +147,10 @@ async function waitForAnswer() {
     return null;
 }
 
-// ========== ПРИНЯТИЕ СЕССИИ (Робин Б) ==========
+// ========== ПРИНЯТИЕ СЕССИИ (личность Б) ==========
 async function acceptSession(id) {
     sessionId = id;
-    statusDiv.textContent = 'Принимаю сессию...';
+    statusDiv.textContent = 'Принимаю сессию: ' + id.slice(0, 8) + '...';
     
     sendToParent({ type: 'status', text: 'Подключаюсь...', duration: 0 });
     
