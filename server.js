@@ -5,11 +5,12 @@ const PORT = process.env.PORT || 10000;
 const store = new Map();
 
 const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Origin', 'https://stepweather-prog.github.io');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
     if (req.method === 'OPTIONS') {
+        res.setHeader('Access-Control-Allow-Origin', 'https://stepweather-prog.github.io');
         res.writeHead(200);
         res.end();
         return;
@@ -22,7 +23,7 @@ const server = http.createServer((req, res) => {
             try {
                 const { sdp } = JSON.parse(body);
                 const id = crypto.randomUUID();
-                store.set(id, { sdp, expires: Date.now() + 5 * 60 * 1000 });
+                store.set(id, { sdp, expires: Date.now() + 2 * 60 * 1000 });
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ id }));
             } catch(e) {
