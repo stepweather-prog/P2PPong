@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P2PPong — просто стрела</title>
+    <title>P2PPong — обучаемая стрела</title>
     <style>
         body { background: #0a0a0a; color: #eee; font-family: monospace; padding: 20px; max-width: 700px; margin: 0 auto; }
         button, input, textarea { background: #1e1e1e; border: 1px solid #444; color: #eee; padding: 10px; border-radius: 8px; font-size: 16px; }
@@ -13,10 +13,12 @@
         #chat { border: 1px solid #333; min-height: 150px; padding: 10px; margin: 10px 0; overflow-y: auto; background: #0f0f0f; }
         .link { word-break: break-all; background: #1a2a1a; padding: 10px; border-radius: 8px; font-size: 14px; }
         hr { border-color: #333; }
+        .stats { font-size: 12px; color: #888; margin-top: 10px; }
+        .stats span { margin-right: 15px; }
     </style>
 </head>
 <body>
-<h2>🏹 P2PPong — стрела без сервера</h2>
+<h2>🏹 P2PPong — стрела с обучением</h2>
 <p style="color:#aaa;">Временные хранилища: 0x0.st, ix.io, paste.rs, file.io, transfer.sh</p>
 
 <div class="box">
@@ -36,51 +38,144 @@
 </div>
 <div id="status" style="color:#aaa; margin-top:10px;">⚡ Готов. Нажми «Создать стрелу».</div>
 
+<!-- Панель статистики роутера -->
+<div class="stats" id="statsPanel" style="display:none;">
+    <strong>Статистика узлов:</strong>
+    <div id="statsContent"></div>
+</div>
+
 <script>
-    // ========== 1. ПРОСТЫЕ ВРЕМЕННЫЕ ХРАНИЛИЩА (без обучения) ==========
+    // ========== 1. САМООБУЧАЮЩИЙСЯ РОУТЕР (статистика + приоритет) ==========
     const STORAGES = [
-        { name: "0x0.st", url: "https://0x0.st", upload: true, download: true },
-        { name: "ix.io", url: "https://ix.io", upload: true, download: true },
-        { name: "paste.rs", url: "https://paste.rs", upload: true, download: true },
-        { name: "file.io", url: "https://file.io", upload: true, download: true },
-        { name: "transfer.sh", url: "https://transfer.sh", upload: true, download: true }
+        { name: "0x0.st", url: "https://0x0.st" },
+        { name: "ix.io", url: "https://ix.io" },
+        { name: "paste.rs", url: "https://paste.rs" },
+        { name: "file.io", url: "https://file.io" },
+        { name: "transfer.sh", url: "https://transfer.sh" }
     ];
 
-    // Загрузить текст на ВСЕ хранилища параллельно, вернуть первый успешный URL файла
-    async function uploadToAny(filename, content) {
-        const uploadPromises = STORAGES.map(async (store) => {
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 3000);
-                const formData = new FormData();
-                formData.append("file", new Blob([content], {type: "text/plain"}), filename);
-                const res = await fetch(store.url, {
-                    method: "POST",
-                    body: formData,
-                    signal: controller.signal,
-                    mode: "cors"
-                });
-                clearTimeout(timeout);
-                if (res.ok) {
-                    let fileUrl = await res.text();
-                    fileUrl = fileUrl.trim();
-                    if (!fileUrl.startsWith("http")) {
-                        if (store.url.endsWith("/")) fileUrl = store.url + fileUrl;
-                        else fileUrl = store.url + "/" + fileUrl;
-                    }
-                    return { store: store.name, fileUrl };
+    class NodeStats {
+        constructor() {
+            this.stats = JSON.parse(localStorage.getItem('p2ppong_nodes') || '{}');
+            // миграция для новых хранилищ
+            for (const store of STORAGES) {
+                if (!this.stats[store.name]) {
+                    this.stats[store.name] = { success: 0, fail: 0, lastSeen: 0, penalty: 0 };
                 }
-            } catch(e) {}
-            return null;
-        });
-        const results = await Promise.allSettled(uploadPromises);
-        for (const r of results) {
-            if (r.status === "fulfilled" && r.value) return r.value;
+            }
+            this.save();
+        }
+        save() {
+            localStorage.setItem('p2ppong_nodes', JSON.stringify(this.stats));
+        }
+        success(name) {
+            const s = this.stats[name];
+            if (s) {
+                s.success++;
+                s.fail = 0;
+                s.penalty = 0;
+                s.lastSeen = Date.now();
+                this.save();
+            }
+        }
+        fail(name) {
+            const s = this.stats[name];
+            if (s) {
+                s.fail++;
+                s.lastSeen = Date.now();
+                if (s.fail >= 3) {
+                    s.penalty = Date.now() + 5 * 60 * 1000; // штраф 5 минут
+                }
+                this.save();
+            }
+        }
+        isUsable(name) {
+            const s = this.stats[name];
+            if (!s) return true;
+            if (s.penalty && Date.now() < s.penalty) return false;
+            return true;
+        }
+        getSortedNodes() {
+            return [...STORAGES].sort((a, b) => {
+                const sa = this.stats[a.name] || {};
+                const sb = this.stats[b.name] || {};
+                const aUsable = this.isUsable(a.name) ? 0 : 1;
+                const bUsable = this.isUsable(b.name) ? 0 : 1;
+                if (aUsable !== bUsable) return aUsable - bUsable;
+                // предпочитаем узлы с большим числом успехов
+                return (sb.success || 0) - (sa.success || 0);
+            });
+        }
+        // для отображения статистики
+        getReport() {
+            let html = '';
+            for (const store of STORAGES) {
+                const s = this.stats[store.name] || {};
+                const usable = this.isUsable(store.name) ? '🟢' : '🔴';
+                html += `<span>${usable} ${store.name}: ${s.success||0}✔ ${s.fail||0}✖</span>`;
+            }
+            return html;
+        }
+    }
+
+    const nodeStats = new NodeStats();
+    // покажем статистику через 2 секунды после загрузки
+    setTimeout(() => {
+        document.getElementById('statsPanel').style.display = 'block';
+        document.getElementById('statsContent').innerHTML = nodeStats.getReport();
+        setInterval(() => {
+            document.getElementById('statsContent').innerHTML = nodeStats.getReport();
+        }, 10000);
+    }, 2000);
+
+    // Загрузить текст, пробуя узлы в порядке убывания надёжности.
+    // Не более 3 параллельных попыток за раз; если все не ответили — пробует следующие 3, и так до 50 попыток.
+    async function uploadToAny(filename, content) {
+        const sortedNodes = nodeStats.getSortedNodes();
+        const totalAttempts = Math.min(sortedNodes.length, 50);
+        const batchSize = 3;
+        
+        for (let i = 0; i < totalAttempts; i += batchSize) {
+            const batch = sortedNodes.slice(i, i + batchSize);
+            const tasks = batch.map(async (store) => {
+                try {
+                    const controller = new AbortController();
+                    const timeout = setTimeout(() => controller.abort(), 3000);
+                    const formData = new FormData();
+                    formData.append("file", new Blob([content], {type: "text/plain"}), filename);
+                    const res = await fetch(store.url, {
+                        method: "POST",
+                        body: formData,
+                        signal: controller.signal,
+                        mode: "cors"
+                    });
+                    clearTimeout(timeout);
+                    if (res.ok) {
+                        let fileUrl = await res.text();
+                        fileUrl = fileUrl.trim();
+                        if (!fileUrl.startsWith("http")) {
+                            if (store.url.endsWith("/")) fileUrl = store.url + fileUrl;
+                            else fileUrl = store.url + "/" + fileUrl;
+                        }
+                        nodeStats.success(store.name);
+                        return { store: store.name, fileUrl };
+                    } else {
+                        nodeStats.fail(store.name);
+                    }
+                } catch(e) {
+                    nodeStats.fail(store.name);
+                }
+                return null;
+            });
+            const results = await Promise.allSettled(tasks);
+            for (const r of results) {
+                if (r.status === "fulfilled" && r.value) return r.value;
+            }
         }
         return null;
     }
 
-    // Скачать текст по URL из любого хранилища (пробуем все, но можно напрямую)
+    // Скачать текст по URL (прямой запрос)
     async function downloadText(url) {
         try {
             const controller = new AbortController();
@@ -92,7 +187,7 @@
         return null;
     }
 
-    // Поиск файла по ID: пробуем все возможные ссылки для каждого хранилища
+    // Поиск файла по ID (перебор всех хранилищ, без изменения)
     async function findOfferById(uuid) {
         const filename = `p2p_${uuid}.offer.txt`;
         for (const store of STORAGES) {
@@ -105,7 +200,7 @@
         return null;
     }
 
-    // ========== 2. WebRTC логика ==========
+    // ========== 2. WebRTC логика (без изменений) ==========
     let peerConnection = null;
     let dataChannel = null;
     let currentUUID = null;
@@ -162,7 +257,7 @@
         currentUUID = uuid;
         const filename = `p2p_${uuid}.offer.txt`;
         
-        // Загружаем offer на все хранилища параллельно, ждём первый успех
+        // Загружаем offer с новым умным роутером
         const uploadResult = await uploadToAny(filename, sdpOffer);
         if (!uploadResult) {
             statusDiv.innerHTML = '❌ Не удалось загрузить offer ни в одно хранилище. Попробуйте позже.';
@@ -186,7 +281,6 @@
         
         // Polling: ищем файл ответа
         const answerFilename = `p2p_${uuid}.answer.txt`;
-        // Пробуем скачать ответ с того же хранилища, куда загрузили offer (заменяем .offer.txt на .answer.txt)
         const answerCandidateUrl = uploadResult.fileUrl.replace(/\.offer\.txt$/, '.answer.txt');
         if (pollingInterval) clearInterval(pollingInterval);
         pollingInterval = setInterval(async () => {
@@ -248,7 +342,7 @@
             await peerConnection.setLocalDescription(answer);
             const answerSdp = peerConnection.localDescription.sdp;
             
-            // Загружаем answer на то же хранилище (или на любое другое) с именем p2p_<uuid>.answer.txt
+            // Загружаем answer с умным роутером
             const answerFilename = `p2p_${uuid}.answer.txt`;
             const uploadResult = await uploadToAny(answerFilename, answerSdp);
             if (uploadResult) {
@@ -256,7 +350,6 @@
             } else {
                 statusDiv.innerHTML = '⚠️ Не удалось отправить ответ, но канал может установиться автоматически.';
             }
-            // Канал откроется, когда создатель получит answer
         } catch (err) {
             statusDiv.innerHTML = `❌ Ошибка WebRTC: ${err.message}`;
             acceptBtn.disabled = false;
@@ -294,6 +387,20 @@
     createBtn.addEventListener('click', createOffer);
     acceptBtn.addEventListener('click', acceptOffer);
     sendBtn.addEventListener('click', sendMessage);
+
+    // ========== 3. Фоновое обучение (раз в 5 минут проверяем случайный узел) ==========
+    setInterval(() => {
+        const sorted = nodeStats.getSortedNodes();
+        // выбираем случайный узел из тех, у кого мало успехов
+        const candidates = sorted.filter(store => (nodeStats.stats[store.name]?.success || 0) < 2);
+        if (candidates.length === 0) return;
+        const randomStore = candidates[Math.floor(Math.random() * candidates.length)];
+        const testName = `p2ppong_ping_${Date.now()}.txt`;
+        uploadToAny(testName, 'ping').then(result => {
+            if (result) console.log(`Фоновая проверка: ${randomStore.name} жив`);
+            else console.log(`Фоновая проверка: ${randomStore.name} мёртв`);
+        });
+    }, 5 * 60 * 1000);
 </script>
 </body>
 </html>
