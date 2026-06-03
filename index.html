@@ -52,15 +52,19 @@ function setupDataChannel(channel, sid) {
 }
 
 function encrypt(text, key) {
-    const bytes = new TextEncoder().encode(text);
-    const enc = bytes.map((b,i) => b ^ key.charCodeAt(i % key.length));
-    return btoa(String.fromCharCode(...enc));
+    const enc = new TextEncoder().encode(text);
+    const keyBytes = new TextEncoder().encode(key);
+    const out = new Uint8Array(enc.length);
+    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+    return btoa(String.fromCharCode(...out));
 }
 
 function decrypt(text, key) {
-    const bytes = Uint8Array.from(atob(text), c => c.charCodeAt(0));
-    const dec = bytes.map((b,i) => b ^ key.charCodeAt(i % key.length));
-    return new TextDecoder().decode(new Uint8Array(dec));
+    const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
+    const keyBytes = new TextEncoder().encode(key);
+    const out = new Uint8Array(enc.length);
+    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+    return new TextDecoder().decode(out);
 }
 
 async function waitForIceComplete(pc) {
