@@ -1,26 +1,34 @@
 const http = require('http');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 10000;
-const SESSION_TTL = 5 * 60 * 1000; // 5 минут жизни сессии
-const MAX_SESSIONS = 10; // Максимум активных сессий
-const CLEANUP_INTERVAL = 60 * 1000; // Очистка каждые 60 секунд
+const SESSION_TTL = 5 * 60 * 1000;
+const MAX_SESSIONS = 10;
+const CLEANUP_INTERVAL = 60 * 1000;
 
-// Хранилище сессий
 const sessions = {};
 
-// Очистка просроченных сессий
+// Генерация токена
+function generateToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+// Проверка токена
+function validateToken(sessionId, token) {
+    if (!sessions[sessionId]) return false;
+    return sessions[sessionId].token === token;
+}
+
 function cleanupSessions() {
     const now = Date.now();
     const ids = Object.keys(sessions);
     
-    // Удаляем просроченные
     for (const id of ids) {
         if (sessions[id].createdAt && (now - sessions[id].createdAt > SESSION_TTL)) {
             delete sessions[id];
         }
     }
     
-    // Если всё ещё слишком много — удаляем самые старые
     const remaining = Object.keys(sessions);
     if (remaining.length > MAX_SESSIONS) {
         const sorted = remaining.sort((a, b) => sessions[a].createdAt - sessions[b].createdAt);
@@ -31,14 +39,13 @@ function cleanupSessions() {
     }
 }
 
-// Продление жизни сессии
 function touchSession(id) {
     if (sessions[id]) {
         sessions[id].createdAt = Date.now();
     }
 }
 
-// Создание или обновление сессии
+// POST /session — создание/принятие сессии
 function handleSession(req, res, body) {
     const { sessionId, role } = body;
     
@@ -48,16 +55,20 @@ function handleSession(req, res, body) {
         return;
     }
     
-    // Создаём или обновляем сессию
+    let token;
+    
     if (!sessions[sessionId]) {
+        token = generateToken();
         sessions[sessionId] = {
             createdAt: Date.now(),
+            token: token,
             creatorReady: false,
             receiverReady: false,
             offer: null,
             answer: null
         };
     } else {
+        token = sessions[sessionId].token;
         touchSession(sessionId);
     }
     
@@ -71,20 +82,20 @@ function handleSession(req, res, body) {
     const matched = session.creatorReady && session.receiverReady;
     
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: matched ? 'matched' : 'waiting' }));
+    res.end(JSON.stringify({ status: matched ? 'matched' : 'waiting', token: token }));
 }
 
-// Получение статуса сессии
-function handleGetSession(req, res, sessionId) {
-    if (!sessionId) {
+// GET /session?id=...&token=... — проверка статуса
+function handleGetSession(req, res, sessionId, token) {
+    if (!sessionId || !token) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'sessionId required' }));
+        res.end(JSON.stringify({ error: 'sessionId and token required' }));
         return;
     }
     
-    if (!sessions[sessionId]) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'waiting' }));
+    if (!sessions[sessionId] || !validateToken(sessionId, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
         return;
     }
     
@@ -95,19 +106,19 @@ function handleGetSession(req, res, sessionId) {
     res.end(JSON.stringify({ status: matched ? 'matched' : 'waiting' }));
 }
 
-// Отправка offer
+// POST /offer — отправка offer
 function handleOffer(req, res, body) {
-    const { sessionId, sdp } = body;
+    const { sessionId, sdp, token } = body;
     
-    if (!sessionId || !sdp) {
+    if (!sessionId || !sdp || !token) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'sessionId and sdp required' }));
+        res.end(JSON.stringify({ error: 'sessionId, sdp, and token required' }));
         return;
     }
     
-    if (!sessions[sessionId]) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'session not found' }));
+    if (!validateToken(sessionId, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
         return;
     }
     
@@ -118,17 +129,17 @@ function handleOffer(req, res, body) {
     res.end(JSON.stringify({ status: 'ok' }));
 }
 
-// Получение offer
-function handleGetOffer(req, res, sessionId) {
-    if (!sessionId) {
+// GET /offer?id=...&token=... — получение offer
+function handleGetOffer(req, res, sessionId, token) {
+    if (!sessionId || !token) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'sessionId required' }));
+        res.end(JSON.stringify({ error: 'sessionId and token required' }));
         return;
     }
     
-    if (!sessions[sessionId]) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'waiting' }));
+    if (!validateToken(sessionId, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
         return;
     }
     
@@ -143,19 +154,19 @@ function handleGetOffer(req, res, sessionId) {
     }
 }
 
-// Отправка answer
+// POST /answer — отправка answer
 function handleAnswer(req, res, body) {
-    const { sessionId, sdp } = body;
+    const { sessionId, sdp, token } = body;
     
-    if (!sessionId || !sdp) {
+    if (!sessionId || !sdp || !token) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'sessionId and sdp required' }));
+        res.end(JSON.stringify({ error: 'sessionId, sdp, and token required' }));
         return;
     }
     
-    if (!sessions[sessionId]) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'session not found' }));
+    if (!validateToken(sessionId, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
         return;
     }
     
@@ -166,17 +177,17 @@ function handleAnswer(req, res, body) {
     res.end(JSON.stringify({ status: 'ok' }));
 }
 
-// Получение answer
-function handleGetAnswer(req, res, sessionId) {
-    if (!sessionId) {
+// GET /answer?id=...&token=... — получение answer
+function handleGetAnswer(req, res, sessionId, token) {
+    if (!sessionId || !token) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'sessionId required' }));
+        res.end(JSON.stringify({ error: 'sessionId and token required' }));
         return;
     }
     
-    if (!sessions[sessionId]) {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ status: 'waiting' }));
+    if (!validateToken(sessionId, token)) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'forbidden' }));
         return;
     }
     
@@ -191,9 +202,7 @@ function handleGetAnswer(req, res, sessionId) {
     }
 }
 
-// Создание сервера
 const server = http.createServer((req, res) => {
-    // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -208,11 +217,10 @@ const server = http.createServer((req, res) => {
     const path = url.pathname;
     const params = url.searchParams;
     
-    // Сбор тела запроса
     let body = '';
     req.on('data', chunk => {
         body += chunk.toString();
-        if (body.length > 100000) { // Защита от больших запросов
+        if (body.length > 100000) {
             res.writeHead(413);
             res.end();
         }
@@ -230,19 +238,18 @@ const server = http.createServer((req, res) => {
             }
         }
         
-        // Роутинг
         if (req.method === 'POST' && path === '/session') {
             handleSession(req, res, parsedBody);
         } else if (req.method === 'GET' && path === '/session') {
-            handleGetSession(req, res, params.get('id'));
+            handleGetSession(req, res, params.get('id'), params.get('token'));
         } else if (req.method === 'POST' && path === '/offer') {
             handleOffer(req, res, parsedBody);
         } else if (req.method === 'GET' && path === '/offer') {
-            handleGetOffer(req, res, params.get('id'));
+            handleGetOffer(req, res, params.get('id'), params.get('token'));
         } else if (req.method === 'POST' && path === '/answer') {
             handleAnswer(req, res, parsedBody);
         } else if (req.method === 'GET' && path === '/answer') {
-            handleGetAnswer(req, res, params.get('id'));
+            handleGetAnswer(req, res, params.get('id'), params.get('token'));
         } else if (req.method === 'GET' && path === '/ping') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ status: 'ok' }));
@@ -253,7 +260,6 @@ const server = http.createServer((req, res) => {
     });
 });
 
-// Запуск очистки
 setInterval(cleanupSessions, CLEANUP_INTERVAL);
 
 server.listen(PORT, () => {
