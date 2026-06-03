@@ -40,7 +40,10 @@ async function apiCall(method, path, body = null) {
 function sendToParent(msg) { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*'); }
 
 function setupDataChannel(channel, sid) {
-    channel.onopen = () => { statusDiv.textContent = 'Канал '+sid.slice(0,8)+' открыт'; };
+    channel.onopen = () => {
+        statusDiv.textContent = 'Канал '+sid.slice(0,8)+' открыт';
+        sendToParent({ type: 'channel-open', secret: channels[sid].sessionSecret, channelId: sid });
+    };
     channel.onmessage = (e) => {
         let text = e.data; const ch = channels[sid];
         if (ch && ch.sessionSecret) { try { text = decrypt(text, ch.sessionSecret); } catch(err) {} }
