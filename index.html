@@ -213,8 +213,8 @@ window.addEventListener('message', (event) => {
     const data = event.data;
     if (!data || !data.action) return;
     
-    if (data.action !== 'handshake' && data.action !== 'ping') {
-        if (!data.secret || data.secret !== sessionSecret) {
+    if (data.action !== 'handshake' && data.action !== 'create' && data.action !== 'accept' && data.action !== 'ping') {
+    if (!data.secret || data.secret !== sessionSecret) {
             sendToParent({ type: 'error', text: 'Неверный секрет' });
             return;
         }
