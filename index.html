@@ -71,8 +71,14 @@ function startPolling(sid) {
             res.messages.forEach(m => {
                 let text = m.packet;
                 const ch = channels[sid];
-                if (ch && ch.sessionSecret) { try { text = decrypt(text, ch.sessionSecret); } catch(err) {} }
-                sendToParent({ type: 'message', text: text, sender: 'Друг', channelId: sid });
+                if (ch && ch.sessionSecret) {
+                    try {
+                        const decrypted = decrypt(text, ch.sessionSecret);
+                        const parsed = JSON.parse(decrypted);
+                        if (parsed.sender === MY_ID) { lastTime = Math.max(lastTime, m.time); return; }
+                        sendToParent({ type: 'message', text: parsed.text, sender: 'Друг', channelId: sid });
+                    } catch(err) {}
+                }
                 lastTime = Math.max(lastTime, m.time);
             });
         }
@@ -122,7 +128,7 @@ async function createSession() {
     
     channels[sid].status = 'open';
     startPolling(sid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid });
+    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
     statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
 }
 
@@ -141,7 +147,7 @@ async function acceptSession(sid, tempKey) {
     const sessionSecret = await sha256(tempKey);
     channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false };
     startPolling(actualSid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid });
+    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' });
     statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
 }
 
@@ -151,7 +157,7 @@ window.addEventListener('message', (event) => {
     if (data.action === 'send') {
         const ch = channels[data.channelId]; if (!ch || !ch.sessionSecret) return;
         if (data.secret !== ch.sessionSecret) { sendToParent({ type: 'error', text: 'Неверный секрет' }); return; }
-        const packet = encrypt(data.text, ch.sessionSecret);
+        const packet = encrypt(JSON.stringify({ text: data.text, sender: MY_ID, time: Date.now() }), ch.sessionSecret);
         apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
         return;
     }
