@@ -24,16 +24,7 @@ const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigat
 const MAX_CHANNELS = isPWA ? 20 : 2;
 let channels = {};
 let handshakeSecret = null;
-
-const iceServers = {
-    iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-    ]
-};
+let pollIntervals = {};
 
 function generateToken() { return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2); }
 
@@ -55,31 +46,6 @@ async function apiCall(method, path, body = null) {
 
 function sendToParent(msg) { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*'); }
 
-function setupDataChannel(channel, sid, isCreator) {
-    channel.onopen = () => {
-        statusDiv.textContent = 'Канал '+sid.slice(0,8)+' открыт';
-        if (isCreator) {
-            channel.send(JSON.stringify({ type: 'secret', secret: channels[sid].sessionSecret }));
-        }
-        sendToParent({ type: 'channel-open', secret: channels[sid].sessionSecret, channelId: sid });
-    };
-    channel.onmessage = (e) => {
-        if (!isCreator) {
-            try {
-                const msg = JSON.parse(e.data);
-                if (msg.type === 'secret') {
-                    channels[sid].sessionSecret = msg.secret;
-                    sendToParent({ type: 'channel-open', secret: msg.secret, channelId: sid });
-                    return;
-                }
-            } catch(err) {}
-        }
-        let text = e.data; const ch = channels[sid];
-        if (ch && ch.sessionSecret) { try { text = decrypt(text, ch.sessionSecret); } catch(err) {} }
-        sendToParent({ type: 'message', text: text, sender: 'Друг', channelId: sid });
-    };
-}
-
 function encrypt(text, key) {
     const enc = new TextEncoder().encode(text);
     const keyBytes = new TextEncoder().encode(key);
@@ -96,11 +62,25 @@ function decrypt(text, key) {
     return new TextDecoder().decode(out);
 }
 
-async function waitForIceComplete(pc) {
-    return new Promise(resolve => {
-        if (pc.iceGatheringState === 'complete') resolve();
-        else pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') resolve(); });
-    });
+function startPolling(sid) {
+    if (pollIntervals[sid]) return;
+    let lastTime = Date.now();
+    pollIntervals[sid] = setInterval(async () => {
+        const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
+        if (res && res.messages) {
+            res.messages.forEach(m => {
+                let text = m.packet;
+                const ch = channels[sid];
+                if (ch && ch.sessionSecret) { try { text = decrypt(text, ch.sessionSecret); } catch(err) {} }
+                sendToParent({ type: 'message', text: text, sender: 'Друг', channelId: sid });
+                lastTime = Math.max(lastTime, m.time);
+            });
+        }
+    }, 6000);
+}
+
+function stopPolling(sid) {
+    if (pollIntervals[sid]) { clearInterval(pollIntervals[sid]); delete pollIntervals[sid]; }
 }
 
 async function checkRender() {
@@ -127,7 +107,7 @@ async function createSession() {
     if (!beaconRes || !beaconRes.sessionId) { sendToParent({ type: 'error', text: 'Сервер не отвечает' }); return; }
     const sid = beaconRes.sessionId;
     const sessionSecret = await sha256(tempKey);
-    channels[sid] = { pc: null, dc: null, tempKey, sessionSecret, status: 'waiting', isCreator: true };
+    channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true };
     const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' + tempKey;
     sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
     sendToParent({ type: 'status', text: 'Ожидаю получателя...' });
@@ -136,28 +116,14 @@ async function createSession() {
     while (Date.now() - startTime < 90000) {
         const check = await apiCall('GET', '/beacon?id=' + sid);
         if (check && check.matched) { matched = true; break; }
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 6000));
     }
     if (!matched) { delete channels[sid]; sendToParent({ type: 'error', text: 'Таймаут ожидания' }); return; }
     
-    sendToParent({ type: 'status', text: 'Создание канала...' });
-    const pc = new RTCPeerConnection(iceServers); const dc = pc.createDataChannel('chat');
-    channels[sid].pc = pc; channels[sid].dc = dc; setupDataChannel(dc, sid, true);
-    const offer = await pc.createOffer(); await pc.setLocalDescription(offer); await waitForIceComplete(pc);
-        await apiCall('POST', '/offer', { sessionId: sid, sdp: pc.localDescription.sdp });
-    await new Promise(r => setTimeout(r, 2000));
-    sendToParent({ type: 'status', text: 'Ожидание ответа...' });
-    
-    let answerSdp = null; const ansStart = Date.now();
-    while (Date.now() - ansStart < 90000) {
-        const ans = await apiCall('GET', '/answer?id=' + sid);
-        if (ans && ans.sdp) { answerSdp = ans.sdp; break; }
-        await new Promise(r => setTimeout(r, 2000));
-    }
-    if (!answerSdp) { delete channels[sid]; sendToParent({ type: 'error', text: 'Таймаут ответа' }); return; }
-    await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     channels[sid].status = 'open';
-    statusDiv.textContent = 'Готов ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
+    startPolling(sid);
+    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid });
+    statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
 }
 
 async function acceptSession(sid, tempKey) {
@@ -169,29 +135,14 @@ async function acceptSession(sid, tempKey) {
         sendToParent({ type: 'error', text: 'Максимум '+MAX_CHANNELS+' чатов.' }); return;
     }
     statusDiv.textContent = 'Поиск маяка...';
-    const findRes = await apiCall('POST', '/find', { tempKey: tempKey, receiverId: MY_ID });
+    const findRes = await apiCall('POST', '/find', { tempKey: tempKey });
     if (!findRes || findRes.status !== 'matched') { sendToParent({ type: 'error', text: 'Маяк не найден' }); return; }
     const actualSid = findRes.sessionId;
     const sessionSecret = await sha256(tempKey);
-    channels[actualSid] = { pc: null, dc: null, tempKey, sessionSecret, status: 'connecting', isCreator: false };
-    
-    sendToParent({ type: 'status', text: 'Ожидание предложения...' });
-    let offerSdp = null; const offStart = Date.now();
-    while (Date.now() - offStart < 120000) {
-        const off = await apiCall('GET', '/offer?id=' + actualSid);
-        if (off && off.sdp) { offerSdp = off.sdp; break; }
-        await new Promise(r => setTimeout(r, 2000));
-    }
-    if (!offerSdp) { delete channels[actualSid]; sendToParent({ type: 'error', text: 'Таймаут предложения' }); return; }
-    
-    sendToParent({ type: 'status', text: 'Создание ответа...' });
-    const pc = new RTCPeerConnection(iceServers); channels[actualSid].pc = pc;
-    pc.ondatachannel = (e) => { channels[actualSid].dc = e.channel; setupDataChannel(e.channel, actualSid, false); };
-    await pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
-    const answer = await pc.createAnswer(); await pc.setLocalDescription(answer); await waitForIceComplete(pc);
-    await apiCall('POST', '/answer', { sessionId: actualSid, sdp: pc.localDescription.sdp });
-    channels[actualSid].status = 'open';
-    statusDiv.textContent = 'Готов ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
+    channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false };
+    startPolling(actualSid);
+    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid });
+    statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
 }
 
 window.addEventListener('message', (event) => {
@@ -200,9 +151,8 @@ window.addEventListener('message', (event) => {
     if (data.action === 'send') {
         const ch = channels[data.channelId]; if (!ch || !ch.sessionSecret) return;
         if (data.secret !== ch.sessionSecret) { sendToParent({ type: 'error', text: 'Неверный секрет' }); return; }
-        if (ch.dc && ch.dc.readyState === 'open') {
-            ch.dc.send(encrypt(data.text, ch.sessionSecret));
-        }
+        const packet = encrypt(data.text, ch.sessionSecret);
+        apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
         return;
     }
     switch(data.action) { case 'create': createSession(); break; case 'accept': acceptSession(data.id, data.key); break; }
