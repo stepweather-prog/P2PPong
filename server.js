@@ -14,7 +14,9 @@ function generateSessionId() { return crypto.randomBytes(16).toString('hex'); }
 function cleanupSessions() {
     const now = Date.now();
     const ids = Object.keys(sessions);
-    for (const id of ids) { if (sessions[id].createdAt && (now - sessions[id].createdAt > SESSION_TTL)) delete sessions[id]; }
+    for (const id of ids) {
+        if (sessions[id].createdAt && (now - sessions[id].createdAt > SESSION_TTL)) delete sessions[id];
+    }
     const remaining = Object.keys(sessions);
     if (remaining.length > MAX_SESSIONS) {
         const sorted = remaining.sort((a,b) => sessions[a].createdAt - sessions[b].createdAt);
@@ -46,29 +48,23 @@ const server = http.createServer((req, res) => {
         if (req.method === 'POST' && path === '/beacon') {
             if (!p.tempKey) { res.writeHead(400); res.end('{}'); return; }
             const sid = generateSessionId();
-            sessions[sid] = { createdAt: Date.now(), tempKey: p.tempKey, offer: null, answer: null, matched: false };
+            sessions[sid] = { createdAt: Date.now(), tempKey: p.tempKey, messages: [], matched: false };
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ sessionId: sid }));
         }
         else if (req.method === 'POST' && path === '/find') {
-            if (!p.tempKey || !p.receiverId) { res.writeHead(400); res.end('{}'); return; }
+            if (!p.tempKey) { res.writeHead(400); res.end('{}'); return; }
             let found = null;
             for (const id of Object.keys(sessions)) {
                 if (sessions[id].tempKey === p.tempKey && !sessions[id].matched) {
-                    sessions[id].receiverId = p.receiverId;
                     sessions[id].matched = true;
                     found = id;
                     touchSession(id);
                     break;
                 }
             }
-            if (found) {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ sessionId: found, status: 'matched' }));
-            } else {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'waiting' }));
-            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify(found ? { sessionId: found, status: 'matched' } : { status: 'waiting' }));
         }
         else if (req.method === 'GET' && path === '/beacon') {
             const id = params.get('id');
@@ -77,33 +73,20 @@ const server = http.createServer((req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ matched: sessions[id].matched }));
         }
-        else if (req.method === 'POST' && path === '/offer') {
-            if (!p.sessionId || !p.sdp) { res.writeHead(400); res.end('{}'); return; }
+        else if (req.method === 'POST' && path === '/message') {
+            if (!p.sessionId || !p.packet) { res.writeHead(400); res.end('{}'); return; }
             if (!sessions[p.sessionId]) { res.writeHead(404); res.end('{}'); return; }
             touchSession(p.sessionId);
-            sessions[p.sessionId].offer = p.sdp;
+            sessions[p.sessionId].messages.push({ packet: p.packet, time: Date.now() });
             res.writeHead(200); res.end('{}');
         }
-        else if (req.method === 'GET' && path === '/offer') {
-            const id = params.get('id');
-            if (!id || !sessions[id]) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'waiting' })); return; }
+        else if (req.method === 'GET' && path === '/message') {
+            const id = params.get('id'), since = parseInt(params.get('since')) || 0;
+            if (!id || !sessions[id]) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ messages: [] })); return; }
             touchSession(id);
+            const msgs = sessions[id].messages.filter(m => m.time > since);
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(sessions[id].offer ? { sdp: sessions[id].offer } : { status: 'waiting' }));
-        }
-        else if (req.method === 'POST' && path === '/answer') {
-            if (!p.sessionId || !p.sdp) { res.writeHead(400); res.end('{}'); return; }
-            if (!sessions[p.sessionId]) { res.writeHead(404); res.end('{}'); return; }
-            touchSession(p.sessionId);
-            sessions[p.sessionId].answer = p.sdp;
-            res.writeHead(200); res.end('{}');
-        }
-        else if (req.method === 'GET' && path === '/answer') {
-            const id = params.get('id');
-            if (!id || !sessions[id]) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ status: 'waiting' })); return; }
-            touchSession(id);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify(sessions[id].answer ? { sdp: sessions[id].answer } : { status: 'waiting' }));
+            res.end(JSON.stringify({ messages: msgs }));
         }
         else if (req.method === 'GET' && path === '/ping') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -114,4 +97,4 @@ const server = http.createServer((req, res) => {
 });
 
 setInterval(cleanupSessions, CLEANUP_INTERVAL);
-server.listen(PORT, () => console.log('Beacon server on ' + PORT));
+server.listen(PORT, () => console.log('Message server on ' + PORT));
