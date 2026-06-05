@@ -2,169 +2,304 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>P2PPong v3.0</title>
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
-        body { display: flex; justify-content: center; align-items: center; }
-        .container { width: 100%; max-width: 600px; padding: 20px; box-sizing: border-box; }
-        #status { color: #888; font-size: 0.9em; margin: 5px 0; }
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: #121212;
+            color: #eee;
+            font-family: sans-serif;
+        }
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 600px;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        #status {
+            color: #888;
+            font-size: 0.85em;
+            margin: 5px 0;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
-<div class="container"><h3>P2PPong v3.0</h3><div id="status"></div></div>
-<script>
-const RENDER_SERVER = 'https://p2ppong.onrender.com';
-const statusDiv = document.getElementById('status');
-const MY_ID = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
-const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-const MAX_CHANNELS = isPWA ? 20 : 2;
-let channels = {};
-let handshakeSecret = null;
-let pollIntervals = {};
+    <div class="container">
+        <h3>🏹 P2PPong v3.0</h3>
+        <div id="status">Пробуждение сервера...</div>
+    </div>
+    <script>
+        (function() {
+            const RENDER_SERVER = 'https://p2ppong.onrender.com';
+            const statusDiv = document.getElementById('status');
+            const MY_ID = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
+            const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+            const MAX_CHANNELS = isPWA ? 20 : 2;
+            let channels = {};
+            let handshakeSecret = null;
+            let pollIntervals = {};
+            let failedPolls = {};
 
-function generateToken() { return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2); }
+            function generateToken() {
+                return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) +
+                    Math.random().toString(36).substring(2);
+            }
 
-async function sha256(text) {
-    const data = new TextEncoder().encode(text);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
-}
+            async function sha256(text) {
+                const data = new TextEncoder().encode(text);
+                const hash = await crypto.subtle.digest('SHA-256', data);
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
 
-async function apiCall(method, path, body = null) {
-    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 80000);
-    try {
-        const options = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal };
-        if (body) options.body = JSON.stringify(body);
-        const res = await fetch(RENDER_SERVER + path, options); clearTimeout(to);
-        if (res.ok) return await res.json(); return null;
-    } catch(e) { clearTimeout(to); return null; }
-}
+            // AES-GCM шифрование через Web Crypto (совместимо с главным окном)
+            async function importAESKey(base64key) {
+                const raw = Uint8Array.from(atob(base64key), c => c.charCodeAt(0));
+                return await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt",
+                    "decrypt"
+                ]);
+            }
 
-function sendToParent(msg) { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*'); }
+            async function aesEncrypt(plaintext, keyBase64) {
+                const key = await importAESKey(keyBase64);
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+                const encoded = new TextEncoder().encode(plaintext);
+                const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+                const payload = { iv: btoa(String.fromCharCode(...iv)), data: btoa(String.fromCharCode(
+                        ...new Uint8Array(ciphertext))) };
+                return JSON.stringify(payload);
+            }
 
-function encrypt(text, key) {
-    const enc = new TextEncoder().encode(text);
-    const keyBytes = new TextEncoder().encode(key);
-    const out = new Uint8Array(enc.length);
-    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-    return btoa(String.fromCharCode(...out));
-}
-
-function decrypt(text, key) {
-    const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
-    const keyBytes = new TextEncoder().encode(key);
-    const out = new Uint8Array(enc.length);
-    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-    return new TextDecoder().decode(out);
-}
-
-function startPolling(sid) {
-    if (pollIntervals[sid]) return;
-    let lastTime = Date.now();
-    pollIntervals[sid] = setInterval(async () => {
-        const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
-        if (res && res.messages) {
-            res.messages.forEach(m => {
-                let text = m.packet;
-                const ch = channels[sid];
-                if (ch && ch.sessionSecret) {
-                    try {
-                        const decrypted = decrypt(text, ch.sessionSecret);
-                        const parsed = JSON.parse(decrypted);
-                        if (parsed.sender === MY_ID) { lastTime = Math.max(lastTime, m.time); return; }
-                        sendToParent({ type: 'message', text: parsed.text, sender: 'Друг', channelId: sid });
-                    } catch(err) {}
+            async function aesDecrypt(payloadStr, keyBase64) {
+                try {
+                    const key = await importAESKey(keyBase64);
+                    const payload = JSON.parse(payloadStr);
+                    const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0));
+                    const data = Uint8Array.from(atob(payload.data), c => c.charCodeAt(0));
+                    const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data);
+                    return new TextDecoder().decode(decrypted);
+                } catch (e) {
+                    return null;
                 }
-                lastTime = Math.max(lastTime, m.time);
+            }
+
+            // API-запросы с повторными попытками при 5xx (сервер просыпается)
+            async function apiCall(method, path, body = null, retries = 3) {
+                for (let attempt = 0; attempt < retries; attempt++) {
+                    const ctrl = new AbortController();
+                    const to = setTimeout(() => ctrl.abort(), 80000);
+                    try {
+                        const options = { method, headers: { 'Content-Type': 'application/json' },
+                            signal: ctrl.signal };
+                        if (body) options.body = JSON.stringify(body);
+                        const res = await fetch(RENDER_SERVER + path, options);
+                        clearTimeout(to);
+                        if (res.ok) return await res.json();
+                        if (res.status >= 500 && attempt < retries - 1) {
+                            await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+                            continue;
+                        }
+                        return null;
+                    } catch (e) {
+                        clearTimeout(to);
+                        if (attempt < retries - 1) {
+                            await new Promise(r => setTimeout(r, 3000 * (attempt + 1)));
+                            continue;
+                        }
+                        return null;
+                    }
+                }
+                return null;
+            }
+
+            function sendToParent(msg) {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage(msg, '*');
+                }
+            }
+
+            // Экспоненциальный поллинг с защитой от засыпания сервера
+            function startPolling(sid, secretKeyB64) {
+                if (pollIntervals[sid]) return;
+                let lastTime = Date.now();
+                failedPolls[sid] = 0;
+                const doPoll = async () => {
+                    const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
+                    if (res && res.messages) {
+                        failedPolls[sid] = 0;
+                        for (const m of res.messages) {
+                            let text = m.packet;
+                            // Пытаемся расшифровать AES-GCM
+                            const decrypted = await aesDecrypt(text, secretKeyB64);
+                            if (decrypted) {
+                                try {
+                                    const parsed = JSON.parse(decrypted);
+                                    if (parsed.sender === MY_ID) {
+                                        lastTime = Math.max(lastTime, m.time);
+                                        continue;
+                                    }
+                                    sendToParent({
+                                        type: 'message',
+                                        text: parsed.text,
+                                        sender: 'Друг',
+                                        channelId: sid
+                                    });
+                                } catch (err) {}
+                            }
+                            lastTime = Math.max(lastTime, m.time);
+                        }
+                        pollIntervals[sid] = setTimeout(doPoll, 2000); // 2 секунды при успехе
+                    } else {
+                        failedPolls[sid]++;
+                        const delay = Math.min(2000 * Math.pow(1.5, failedPolls[sid]),
+                        30000); // экспоненциально до 30 сек
+                        pollIntervals[sid] = setTimeout(doPoll, delay);
+                    }
+                };
+                doPoll();
+            }
+
+            function stopPolling(sid) {
+                if (pollIntervals[sid]) {
+                    clearTimeout(pollIntervals[sid]);
+                    delete pollIntervals[sid];
+                }
+                delete failedPolls[sid];
+            }
+
+            // Проверка сервера с повторными попытками (сервер может спать)
+            async function checkRender(retryCount = 0) {
+                statusDiv.textContent = retryCount === 0 ? '🏹 Будим сервер...' :
+                    `🏹 Попытка ${retryCount + 1}...`;
+                const ping = await apiCall('GET', '/ping');
+                if (ping) {
+                    handshakeSecret = generateToken();
+                    statusDiv.textContent = '✅ Готов (' + Object.keys(channels).length + '/' +
+                        MAX_CHANNELS + ')';
+                    sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
+                } else {
+                    const delay = Math.min(3000 * (retryCount + 1), 20000);
+                    statusDiv.textContent = `⏳ Сервер спит. Ещё попытка через ${delay/1000}с...`;
+                    setTimeout(() => checkRender(retryCount + 1), delay);
+                }
+            }
+
+            async function createSession() {
+                if (!isPWA && Object.keys(channels).length >= 2) {
+                    sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
+                    sendToParent({ type: 'install-prompt' });
+                    return;
+                }
+                if (Object.keys(channels).length >= MAX_CHANNELS) {
+                    sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' });
+                    return;
+                }
+                statusDiv.textContent = '⚒ Создание маяка...';
+                const tempKey = generateToken();
+                const beaconRes = await apiCall('POST', '/beacon', { tempKey: tempKey });
+                if (!beaconRes || !beaconRes.sessionId) {
+                    sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте позже.' });
+                    return;
+                }
+                const sid = beaconRes.sessionId;
+                const sessionSecret = await sha256(tempKey);
+                channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true };
+                const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' +
+                    tempKey;
+                sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
+                sendToParent({ type: 'status', text: '📨 Ожидаю получателя (90 сек)...' });
+
+                let matched = false;
+                const startTime = Date.now();
+                while (Date.now() - startTime < 90000) {
+                    const check = await apiCall('GET', '/beacon?id=' + sid);
+                    if (check && check.matched) { matched = true; break; }
+                    await new Promise(r => setTimeout(r, 4000));
+                }
+                if (!matched) {
+                    delete channels[sid];
+                    sendToParent({ type: 'error', text: '⏰ Таймаут ожидания. Никто не принял стрелу.' });
+                    return;
+                }
+                channels[sid].status = 'open';
+                startPolling(sid, sessionSecret);
+                sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
+                statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' +
+                    MAX_CHANNELS + ')';
+            }
+
+            async function acceptSession(sid, tempKey) {
+                if (!isPWA && Object.keys(channels).length >= 2) {
+                    sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
+                    sendToParent({ type: 'install-prompt' });
+                    return;
+                }
+                if (Object.keys(channels).length >= MAX_CHANNELS) {
+                    sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' });
+                    return;
+                }
+                statusDiv.textContent = '🔍 Поиск маяка...';
+                const findRes = await apiCall('POST', '/find', { tempKey: tempKey });
+                if (!findRes || findRes.status !== 'matched') {
+                    sendToParent({ type: 'error', text: '🏹 Маяк не найден или истек.' });
+                    return;
+                }
+                const actualSid = findRes.sessionId;
+                const sessionSecret = await sha256(tempKey);
+                channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false };
+                startPolling(actualSid, sessionSecret);
+                sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualId,
+                    role: 'receiver' });
+                statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' +
+                    MAX_CHANNELS + ')';
+            }
+
+            window.addEventListener('message', async (event) => {
+                const data = event.data;
+                if (!data || !data.action) return;
+                if (data.action === 'handshake') {
+                    if (data.handshake === handshakeSecret) {
+                        handshakeSecret = null;
+                        sendToParent({ type: 'handshake-ok' });
+                    }
+                    return;
+                }
+                if (data.action === 'send') {
+                    const ch = channels[data.channelId];
+                    if (!ch || !ch.sessionSecret) return;
+                    if (data.secret !== ch.sessionSecret) {
+                        sendToParent({ type: 'error', text: 'Неверный секрет колчана.' });
+                        return;
+                    }
+                    // Шифруем AES-GCM
+                    const plaintext = JSON.stringify({ text: data.text, sender: MY_ID, time: Date
+                            .now() });
+                    const packet = await aesEncrypt(plaintext, ch.sessionSecret);
+                    apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
+                    return;
+                }
+                switch (data.action) {
+                    case 'create':
+                        createSession();
+                        break;
+                    case 'accept':
+                        acceptSession(data.id, data.key);
+                        break;
+                }
             });
-        }
-    }, 6000);
-}
 
-function stopPolling(sid) {
-    if (pollIntervals[sid]) { clearInterval(pollIntervals[sid]); delete pollIntervals[sid]; }
-}
-
-async function checkRender() {
-    statusDiv.textContent = 'Проверка сервера...';
-    const ping = await apiCall('GET', '/ping');
-    if (ping) {
-        handshakeSecret = generateToken();
-        statusDiv.textContent = 'Готов ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
-        sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-    } else { statusDiv.textContent = 'Сервер не отвечает'; setTimeout(checkRender, 5000); }
-}
-
-async function createSession() {
-    if (!isPWA && Object.keys(channels).length >= 2) {
-        sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-        sendToParent({ type: 'install-prompt' }); return;
-    }
-    if (Object.keys(channels).length >= MAX_CHANNELS) {
-        sendToParent({ type: 'error', text: 'Максимум '+MAX_CHANNELS+' чатов.' }); return;
-    }
-    statusDiv.textContent = 'Создание маяка...';
-    const tempKey = generateToken();
-    const beaconRes = await apiCall('POST', '/beacon', { tempKey: tempKey });
-    if (!beaconRes || !beaconRes.sessionId) { sendToParent({ type: 'error', text: 'Сервер не отвечает' }); return; }
-    const sid = beaconRes.sessionId;
-    const sessionSecret = await sha256(tempKey);
-    channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true };
-    const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' + tempKey;
-    sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
-    sendToParent({ type: 'status', text: 'Ожидаю получателя...' });
-    
-    let matched = false; const startTime = Date.now();
-    while (Date.now() - startTime < 90000) {
-        const check = await apiCall('GET', '/beacon?id=' + sid);
-        if (check && check.matched) { matched = true; break; }
-        await new Promise(r => setTimeout(r, 6000));
-    }
-    if (!matched) { delete channels[sid]; sendToParent({ type: 'error', text: 'Таймаут ожидания' }); return; }
-    
-    channels[sid].status = 'open';
-    startPolling(sid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
-    statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
-}
-
-async function acceptSession(sid, tempKey) {
-    if (!isPWA && Object.keys(channels).length >= 2) {
-        sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-        sendToParent({ type: 'install-prompt' }); return;
-    }
-    if (Object.keys(channels).length >= MAX_CHANNELS) {
-        sendToParent({ type: 'error', text: 'Максимум '+MAX_CHANNELS+' чатов.' }); return;
-    }
-    statusDiv.textContent = 'Поиск маяка...';
-    const findRes = await apiCall('POST', '/find', { tempKey: tempKey });
-    if (!findRes || findRes.status !== 'matched') { sendToParent({ type: 'error', text: 'Маяк не найден' }); return; }
-    const actualSid = findRes.sessionId;
-    const sessionSecret = await sha256(tempKey);
-    channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false };
-    startPolling(actualSid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' });
-    statusDiv.textContent = 'Комната открыта ('+Object.keys(channels).length+'/'+MAX_CHANNELS+')';
-}
-
-window.addEventListener('message', (event) => {
-    const data = event.data; if (!data || !data.action) return;
-    if (data.action === 'handshake') { if (data.handshake === handshakeSecret) { handshakeSecret = null; sendToParent({ type: 'handshake-ok' }); } return; }
-    if (data.action === 'send') {
-        const ch = channels[data.channelId]; if (!ch || !ch.sessionSecret) return;
-        if (data.secret !== ch.sessionSecret) { sendToParent({ type: 'error', text: 'Неверный секрет' }); return; }
-        const packet = encrypt(JSON.stringify({ text: data.text, sender: MY_ID, time: Date.now() }), ch.sessionSecret);
-        apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
-        return;
-    }
-    switch(data.action) { case 'create': createSession(); break; case 'accept': acceptSession(data.id, data.key); break; }
-});
-
-checkRender();
-</script>
+            checkRender();
+        })();
+    </script>
 </body>
 </html>
