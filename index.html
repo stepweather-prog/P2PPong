@@ -26,14 +26,12 @@
         return crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2);
     }
 
-    // SHA-256 → hex-строка (64 символа)
     async function sha256(text){
         const data=new TextEncoder().encode(text);
         const hash=await crypto.subtle.digest('SHA-256',data);
         return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
     }
 
-    // Конвертируем hex-строку SHA-256 в 32 байта для AES-256
     function hexToBytes(hex){
         const bytes=new Uint8Array(hex.length/2);
         for(let i=0;i<bytes.length;i++){
