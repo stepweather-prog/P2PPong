@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2PPong v4.3</title>
+    <title>P2PPong v4.2</title>
     <style>
         html,body{margin:0;padding:0;height:100%;background:#121212;color:#eee;font-family:sans-serif}
         body{display:flex;justify-content:center;align-items:center}
@@ -12,7 +12,7 @@
     </style>
 </head>
 <body>
-<div class="container"><h3>🏹 P2PPong v4.3</h3><div id="status">Пробуждение сервера...</div></div>
+<div class="container"><h3>🏹 P2PPong v4.2</h3><div id="status">Пробуждение сервера...</div></div>
 <script>
 (function(){
     const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
@@ -22,32 +22,7 @@
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
     const MAX_CHANNELS = isPWA ? 20 : 2;
     let channels = {}, handshakeSecret = null, pollIntervals = {}, failedPolls = {};
-    let currentServer = 'render', isCreatingSession = false, createAbortController = null;
-    let pendingIceCandidates = {};
-
-    // Восстановление каналов из localStorage
-    try {
-        const saved = localStorage.getItem('p2ppong_channels');
-        if (saved) {
-            const parsed = JSON.parse(saved);
-            for (const [sid, data] of Object.entries(parsed)) {
-                if (data.sessionSecret && data.server) {
-                    channels[sid] = data;
-                }
-            }
-            statusDiv.textContent = '🔄 Восстановлено ' + Object.keys(channels).length + ' колчанов';
-        }
-    } catch(e) { localStorage.removeItem('p2ppong_channels'); }
-
-    function saveChannels() {
-        try {
-            const toSave = {};
-            for (const [sid, data] of Object.entries(channels)) {
-                toSave[sid] = { sessionSecret: data.sessionSecret, server: data.server, status: data.status, isCreator: data.isCreator };
-            }
-            localStorage.setItem('p2ppong_channels', JSON.stringify(toSave));
-        } catch(e) { /* квота превышена */ }
-    }
+    let currentServer = 'render';
 
     function generateToken() { return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2); }
     async function sha256(text) { const data = new TextEncoder().encode(text); const hash = await crypto.subtle.digest('SHA-256', data); return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join(''); }
@@ -57,12 +32,9 @@
     async function aesEncrypt(plaintext, keyHex) { const key = await importAESKey(keyHex); const iv = crypto.getRandomValues(new Uint8Array(12)); const encoded = new TextEncoder().encode(plaintext); const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded); const payload = { iv: btoa(String.fromCharCode(...iv)), data: btoa(String.fromCharCode(...new Uint8Array(ciphertext))) }; return JSON.stringify(payload); }
     async function aesDecrypt(payloadStr, keyHex) { try { const key = await importAESKey(keyHex); const payload = JSON.parse(payloadStr); const iv = Uint8Array.from(atob(payload.iv), c => c.charCodeAt(0)); const data = Uint8Array.from(atob(payload.data), c => c.charCodeAt(0)); const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, data); return new TextDecoder().decode(decrypted); } catch(e) { console.error('AES decrypt error:', e.message); return null; } }
 
-    async function apiCall(serverUrl, method, path, body = null, retries = 3, signal = null) {
+    async function apiCall(serverUrl, method, path, body = null, retries = 3) {
         for(let attempt = 0; attempt < retries; attempt++) {
-            if (signal && signal.aborted) return null;
             const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 15000);
-            // Если внешний сигнал — связываем
-            if (signal) { signal.addEventListener('abort', () => ctrl.abort()); }
             try {
                 const options = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal };
                 if(body) options.body = JSON.stringify(body);
@@ -70,7 +42,7 @@
                 if(res.ok) return await res.json();
                 if(res.status >= 500 && attempt < retries - 1) { await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; }
                 return null;
-            } catch(e) { clearTimeout(to); if(e.name === 'AbortError') return null; if(attempt < retries - 1) { await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; } return null; }
+            } catch(e) { clearTimeout(to); if(attempt < retries - 1) { await new Promise(r => setTimeout(r, 2000 * (attempt + 1))); continue; } return null; }
         }
         return null;
     }
@@ -108,21 +80,6 @@
 
     function stopPolling(sid) { if(pollIntervals[sid]) { clearTimeout(pollIntervals[sid]); delete pollIntervals[sid]; } delete failedPolls[sid]; }
 
-    // Очистка всех таймеров при выгрузке
-    window.addEventListener('beforeunload', () => {
-        for(const sid of Object.keys(pollIntervals)) { stopPolling(sid); }
-    });
-
-    // Восстановление поллинга для сохранённых каналов
-    function restorePolling() {
-        for(const [sid, data] of Object.entries(channels)) {
-            if(data.sessionSecret && data.status === 'open') {
-                startPolling(sid, data.sessionSecret, data.server);
-                sendToParent({ type: 'channel-restored', secret: data.sessionSecret, channelId: sid, role: data.isCreator ? 'creator' : 'receiver' });
-            }
-        }
-    }
-
     async function checkServers() {
         const renderPing = await apiCall(RENDER_SERVER, 'GET', '/ping');
         const workersPing = await apiCall(WORKERS_URL, 'GET', '/ping');
@@ -130,12 +87,6 @@
             handshakeSecret = generateToken();
             statusDiv.textContent = '✅ Готов (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
             sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-            // Отправляем список активных каналов
-            if(Object.keys(channels).length > 0) {
-                sendToParent({ type: 'restored-channels', channels: Object.keys(channels).map(sid => ({
-                    channelId: sid, secret: channels[sid].sessionSecret, role: channels[sid].isCreator ? 'creator' : 'receiver'
-                })) });
-            }
         } else {
             statusDiv.textContent = '⏳ Серверы спят. Пробуем...';
             setTimeout(checkServers, 5000);
@@ -143,79 +94,43 @@
     }
 
     async function createSession() {
-        if(isCreatingSession) { sendToParent({ type: 'error', text: '⚒ Стрела уже куётся.' }); return; }
         if(!isPWA && Object.keys(channels).length >= 2) { sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' }); sendToParent({ type: 'install-prompt' }); return; }
         if(Object.keys(channels).length >= MAX_CHANNELS) { sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' }); return; }
-        
-        isCreatingSession = true;
-        createAbortController = new AbortController();
-        const signal = createAbortController.signal;
         const server = currentServer;
         const serverUrl = server === 'workers' ? WORKERS_URL : RENDER_SERVER;
         statusDiv.textContent = '⚒ Создание маяка [' + server + ']...';
-        
         const tempKey = generateToken();
         const beaconRes = await apiCall(serverUrl, 'POST', '/beacon', { tempKey: tempKey });
-        if(!beaconRes || !beaconRes.sessionId) { 
-            isCreatingSession = false;
-            sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте позже.' }); 
-            return; 
-        }
+        if(!beaconRes || !beaconRes.sessionId) { sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте позже.' }); return; }
         const sid = beaconRes.sessionId;
         const sessionSecret = await sha256(tempKey);
         channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true, server: server };
-        saveChannels();
-        
         const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' + tempKey + '&server=' + server;
         sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
-        sendToParent({ type: 'status', text: '📨 Ожидаю получателя (120 сек) [' + server + ']... Нажмите Отмена чтобы прервать.' });
-        
+        sendToParent({ type: 'status', text: '📨 Ожидаю получателя (90 сек) [' + server + ']...' });
         let matched = false; const startTime = Date.now();
-        while(Date.now() - startTime < 120000) {
-            if(signal.aborted) { 
-                delete channels[sid]; saveChannels();
-                isCreatingSession = false;
-                sendToParent({ type: 'error', text: '⏹ Ожидание прервано.' }); 
-                return; 
-            }
-            const check = await apiCall(serverUrl, 'GET', '/beacon?id=' + sid, 3, signal);
+        while(Date.now() - startTime < 90000) {
+            const check = await apiCall(serverUrl, 'GET', '/beacon?id=' + sid);
             if(check && check.matched) { matched = true; break; }
             await new Promise(r => setTimeout(r, 4000));
         }
-        
-        isCreatingSession = false;
-        if(!matched) { 
-            delete channels[sid]; saveChannels();
-            sendToParent({ type: 'error', text: '⏰ Таймаут ожидания. Никто не принял стрелу.' }); 
-            return; 
-        }
-        
-        channels[sid].status = 'open'; saveChannels();
-        startPolling(sid, sessionSecret, server);
+        if(!matched) { delete channels[sid]; sendToParent({ type: 'error', text: '⏰ Таймаут ожидания. Никто не принял стрелу.' }); return; }
+        channels[sid].status = 'open'; startPolling(sid, sessionSecret, server);
         sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
         statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-    }
-
-    function cancelSessionCreation() {
-        if(createAbortController) { createAbortController.abort(); createAbortController = null; }
-        isCreatingSession = false;
     }
 
     async function acceptSession(sid, tempKey, server) {
         if(!sid || !tempKey) { sendToParent({ type: 'error', text: 'Неверная ссылка: нет данных сессии.' }); return; }
         if(!isPWA && Object.keys(channels).length >= 2) { sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' }); sendToParent({ type: 'install-prompt' }); return; }
         if(Object.keys(channels).length >= MAX_CHANNELS) { sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' }); return; }
-        
         const serverUrl = server === 'workers' ? WORKERS_URL : RENDER_SERVER;
         statusDiv.textContent = '🔍 Поиск маяка [' + server + ']...';
         const findRes = await apiCall(serverUrl, 'POST', '/find', { tempKey: tempKey });
         if(!findRes || findRes.status !== 'matched') { sendToParent({ type: 'error', text: '🏹 Маяк не найден или истек.' }); return; }
-        
         const actualSid = findRes.sessionId || sid;
         const sessionSecret = await sha256(tempKey);
         channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false, server: server };
-        saveChannels();
-        
         startPolling(actualSid, sessionSecret, server);
         sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' });
         statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
@@ -224,23 +139,17 @@
     window.addEventListener('message', async (event) => {
         const data = event.data;
         if(!data || !data.action) return;
-        
-        if(data.action === 'handshake') { 
-            if(data.handshake === handshakeSecret) { 
-                handshakeSecret = null; 
-                restorePolling();
-                sendToParent({ type: 'handshake-ok' }); 
-            } 
-            return; 
-        }
-        
-        if(data.action === 'cancel-create') {
-            cancelSessionCreation();
+
+        if(data.action === 'handshake') {
+            if(data.handshake === handshakeSecret) {
+                handshakeSecret = null;
+                sendToParent({ type: 'handshake-ok' });
+            }
             return;
         }
-        
+
         if(data.server) { currentServer = data.server; }
-        
+
         if(data.action === 'send') {
             const ch = channels[data.channelId];
             if(!ch || !ch.sessionSecret) { sendToParent({ type: 'error', text: 'Канал не найден.' }); return; }
@@ -249,29 +158,15 @@
             const packet = await aesEncrypt(plaintext, ch.sessionSecret);
             const serverUrl = ch.server === 'workers' ? WORKERS_URL : RENDER_SERVER;
             apiCall(serverUrl, 'POST', '/message', { sessionId: data.channelId, packet: packet });
-            
-            // Буферизация ICE-кандидатов
-            if(typeof data.text === 'string' && data.text.startsWith('__ICE__')) {
-                if(!pendingIceCandidates[data.channelId]) pendingIceCandidates[data.channelId] = [];
-                pendingIceCandidates[data.channelId].push(data.text);
-            }
             return;
         }
-        
+
         switch(data.action) {
             case 'create':
                 createSession();
                 break;
             case 'accept':
                 acceptSession(data.id, data.key, data.server || currentServer);
-                break;
-            case 'restore-channels':
-                // RobinHood запрашивает восстановление
-                if(Object.keys(channels).length > 0) {
-                    sendToParent({ type: 'restored-channels', channels: Object.keys(channels).map(sid => ({
-                        channelId: sid, secret: channels[sid].sessionSecret, role: channels[sid].isCreator ? 'creator' : 'receiver'
-                    })) });
-                }
                 break;
         }
     });
