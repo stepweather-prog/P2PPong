@@ -24,9 +24,8 @@
             var currentServer = 'render', isCreatingSession = false, createAbortController = null;
             var activePolls = {};
             var lastBeaconAttempt = 0;
-                        var beaconCooldown = 10000; 10 секунд между попытками создания маяка
-
-             Безопасное восстановление каналов
+                        var beaconCooldown = 10000; 
+             
             try {
                 var saved = sessionStorage.getItem('p2ppong_channels');
                 if (saved) {
