@@ -254,49 +254,104 @@
             async function createSession() {
     var now = Date.now();
     if (now - lastBeaconAttempt < beaconCooldown) {
-        sendToParent({ type: 'error', text: '⏳ Подождите ' + Math.ceil((beaconCooldown - (now - lastBeaconAttempt))/1000) + ' сек. перед новой стрелой.' });
+        sendToParent({ type: 'error', text: '⏳ Подождите ' + Math.ceil((beaconCooldown - (now - lastBeaconAttempt)) / 1000) + ' сек. перед новой стрелой.' });
         return;
     }
     lastBeaconAttempt = now;
 
-    if(isCreatingSession) { 
-         sendToParent({ type: 'error', text: '⚒ Стрела уже куётся.' }); return; }
-                if(!isPWA && Object.keys(channels).length >= 2) { sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' }); sendToParent({ type: 'install-prompt' }); return; }
-                if(Object.keys(channels).length >= MAX_CHANNELS) { sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' }); return; }
+    if (isCreatingSession) {
+        sendToParent({ type: 'error', text: '⚒ Стрела уже куётся.' });
+        return;
+    }
+    if (!isPWA && Object.keys(channels).length >= 2) {
+        sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
+        sendToParent({ type: 'install-prompt' });
+        return;
+    }
+    if (Object.keys(channels).length >= MAX_CHANNELS) {
+        sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' });
+        return;
+    }
 
-                isCreatingSession = true; createAbortController = new AbortController();
-                var signal = createAbortController.signal; var server = currentServer;
-                var serverUrl = server === 'workers' ? WORKERS_URL : RENDER_SERVER;
-                statusDiv.textContent = '⚒ Создание маяка [' + server + ']...';
+    isCreatingSession = true;
+    createAbortController = new AbortController();
+    var signal = createAbortController.signal;
+    var server = currentServer;
+    var serverUrl = server === 'workers' ? WORKERS_URL : RENDER_SERVER;
+    statusDiv.textContent = '⚒ Создание маяка [' + server + ']...';
 
-                try {
-                    var tempKey = generateToken();
-                    var beaconRes = await apiCall(serverUrl, 'POST', '/beacon', { tempKey: tempKey }, 3, signal);
-                    if(!beaconRes || !beaconRes.sessionId) { sendToParent({ type: 'error', text: 'Сервер не отвечает.' }); return; }
-                    var sid = beaconRes.sessionId;
-                    var sessionSecret = await sha256(tempKey);
-                    if (!sessionSecret) { sendToParent({ type: 'error', text: 'Ошибка генерации ключа.' }); return; }
-                    channels[sid] = { tempKey: tempKey, sessionSecret: sessionSecret, status: 'waiting', isCreator: true, server: server };
-                    saveChannels();
-                    var link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' + tempKey + '&server=' + server;
-                    sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
-                    sendToParent({ type: 'status', text: '📨 Ожидаю получателя (120 сек) [' + server + ']...' });
+    try {
+        var tempKey = generateToken();
+        var beaconRes = await apiCall(serverUrl, 'POST', '/beacon', { tempKey: tempKey }, 3, signal);
+        if (!beaconRes || !beaconRes.sessionId) {
+            sendToParent({ type: 'error', text: 'Сервер не отвечает.' });
+            statusDiv.textContent = '❌ Ошибка создания маяка';
+            isCreatingSession = false;
+            return;
+        }
 
-                    var matched = false; var startTime = Date.now();
-                    while(Date.now() - startTime < 120000) {
-                        if(signal.aborted) { cleanupChannel(sid); sendToParent({ type: 'error', text: '⏹ Ожидание прервано.' }); return; }
-                        var check = await apiCall(serverUrl, 'GET', '/beacon?id=' + sid, 3, signal);
-                        if(check && check.matched) { matched = true; break; }
-                        await new Promise(function(r) { setTimeout(r, 4000); });
-                    }
-                    if(!matched) { cleanupChannel(sid); sendToParent({ type: 'error', text: '⏰ Таймаут ожидания.' }); return; }
-                    channels[sid].status = 'open'; saveChannels();
-                    startPolling(sid, sessionSecret, server);
-                    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
-                    statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-                } catch(e) { sendToParent({ type: 'error', text: 'Ошибка создания сессии.' }); }
+        var sid = beaconRes.sessionId;
+        var sessionSecret = await sha256(tempKey);
+        if (!sessionSecret) {
+            sendToParent({ type: 'error', text: 'Ошибка генерации ключа.' });
+            isCreatingSession = false;
+            return;
+        }
+
+        channels[sid] = {
+            tempKey: tempKey,
+            sessionSecret: sessionSecret,
+            status: 'waiting',
+            isCreator: true,
+            server: server
+        };
+        saveChannels();
+
+        var link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&key=' + tempKey + '&server=' + server;
+        sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
+        sendToParent({ type: 'status', text: '📨 Ожидаю получателя (120 сек) [' + server + ']...' });
+
+        var matched = false;
+        var startTime = Date.now();
+        while (Date.now() - startTime < 120000) {
+            if (signal.aborted) {
+                cleanupChannel(sid);
+                sendToParent({ type: 'error', text: '⏹ Ожидание прервано.' });
+                statusDiv.textContent = '⏹ Ожидание прервано';
                 isCreatingSession = false;
+                return;
             }
+
+            var check = await apiCall(serverUrl, 'GET', '/beacon?id=' + sid, 3, signal);
+            if (check && check.matched) {
+                matched = true;
+                break;
+            }
+            await new Promise(function (r) { setTimeout(r, 4000); });
+        }
+
+        isCreatingSession = false;
+
+        if (!matched) {
+            cleanupChannel(sid);
+            sendToParent({ type: 'error', text: '⏰ Таймаут ожидания. Никто не принял стрелу.' });
+            statusDiv.textContent = '⏰ Таймаут';
+            return;
+        }
+
+        // Канал открыт – отправляем уведомление СОЗДАТЕЛЮ
+        channels[sid].status = 'open';
+        saveChannels();
+        startPolling(sid, sessionSecret, server);
+        sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
+        statusDiv.textContent = '🏹 Колчан открыт (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
+
+    } catch (e) {
+        sendToParent({ type: 'error', text: 'Ошибка создания сессии.' });
+        statusDiv.textContent = '❌ Ошибка';
+        isCreatingSession = false;
+    }
+}
 
             function cancelSessionCreation() { if(createAbortController) { createAbortController.abort(); createAbortController = null; } isCreatingSession = false; }
 
