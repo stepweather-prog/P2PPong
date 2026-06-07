@@ -1,3 +1,4 @@
+var MAIN_ORIGIN = 'https://stepweather-prog.github.io';
 (function(){
     var WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
     var RENDER_SERVER = 'https://p2ppong.onrender.com';
@@ -189,7 +190,7 @@
     function sendToParent(msg) { 
         try {
             if(window.parent && window.parent !== window) { 
-                window.parent.postMessage(msg, '*'); 
+                window.parent.postMessage(msg, MAIN_ORIGIN);
             }
         } catch(e) {
             console.error('Send to parent error:', e.message);
@@ -526,7 +527,7 @@
         if(!data || !data.action) return;
 
         // Проверка источника для безопасности (опционально)
-        // if (event.origin !== 'https://stepweather-prog.github.io') return;
+        if (event.origin !== MAIN_ORIGIN) return;
 
         if(data.action === 'handshake') {
             if(data.handshake === handshakeSecret && handshakeSecret) {
