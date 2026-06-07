@@ -24,9 +24,9 @@
             var currentServer = 'render', isCreatingSession = false, createAbortController = null;
             var activePolls = {};
             var lastBeaconAttempt = 0;
-                        var beaconCooldown = 10000; // 10 секунд между попытками создания маяка
+                        var beaconCooldown = 10000; 10 секунд между попытками создания маяка
 
-            // Безопасное восстановление каналов
+             Безопасное восстановление каналов
             try {
                 var saved = sessionStorage.getItem('p2ppong_channels');
                 if (saved) {
@@ -302,7 +302,7 @@
             function cancelSessionCreation() { if(createAbortController) { createAbortController.abort(); createAbortController = null; } isCreatingSession = false; }
 
             async function acceptSession(sid, tempKey, server) {    
-                // Защита от частых попыток подключения
+                 Защита от частых попыток подключения
     if (lastBeaconAttempt && Date.now() - lastBeaconAttempt < 5000) {
         sendToParent({ type: 'error', text: '⏳ Подождите 5 сек. перед новой попыткой.' });
         return;
