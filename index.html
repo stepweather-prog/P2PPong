@@ -23,9 +23,12 @@
             var channels = {}, handshakeSecret = null, pollIntervals = {}, failedPolls = {};
             var currentServer = 'render', isCreatingSession = false, createAbortController = null;
             var activePolls = {};
+            var lastBeaconAttempt = 0;
+                        var beaconCooldown = 10000; // 10 секунд между попытками создания маяка
 
+            // Безопасное восстановление каналов
             try {
-                var saved = localStorage.getItem('p2ppong_channels');
+                var saved = sessionStorage.getItem('p2ppong_channels');
                 if (saved) {
                     var parsed = JSON.parse(saved);
                     if (parsed && typeof parsed === 'object') {
@@ -47,20 +50,29 @@
                         }
                     }
                 }
-            } catch(e) { try { localStorage.removeItem('p2ppong_channels'); } catch(ex) {} }
+            } catch(e) {
+                console.error('Ошибка загрузки каналов:', e.message);
+                try { sessionStorage.removeItem('p2ppong_channels'); } catch(ex) {}
+            }
 
             function saveChannels() {
                 try {
                     var toSave = {};
                     Object.keys(channels).forEach(function(sid) {
                         if (channels[sid] && channels[sid].sessionSecret) {
-                            toSave[sid] = { sessionSecret: channels[sid].sessionSecret, server: channels[sid].server || currentServer, status: channels[sid].status || 'open', isCreator: channels[sid].isCreator || false };
+                            toSave[sid] = {
+                                sessionSecret: channels[sid].sessionSecret,
+                                server: channels[sid].server || currentServer,
+                                status: channels[sid].status || 'open',
+                                isCreator: channels[sid].isCreator || false
+                            };
                         }
                     });
-                    localStorage.setItem('p2ppong_channels', JSON.stringify(toSave));
-                } catch(e) {}
+                    sessionStorage.setItem('p2ppong_channels', JSON.stringify(toSave));
+                } catch(e) {
+                    console.error('Ошибка сохранения каналов:', e.message);
+                }
             }
-
             function generateToken() { return crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2); }
 
             async function sha256(text) {
@@ -205,28 +217,51 @@
                 if (restoredCount > 0) { statusDiv.textContent = '🔄 Восстановлено ' + restoredCount + ' каналов поллинга'; }
             }
 
-            async function checkServers() {
-                try {
-                    var renderPing = await apiCall(RENDER_SERVER, 'GET', '/ping');
-                    var workersPing = await apiCall(WORKERS_URL, 'GET', '/ping');
-                    if (renderPing || workersPing) {
-                        handshakeSecret = generateToken();
-                        statusDiv.textContent = '✅ Готов (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-                        sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-                        if(Object.keys(channels).length > 0) {
-                            sendToParent({ type: 'restored-channels', channels: Object.keys(channels).map(function(sid) {
-                                return { channelId: sid, secret: channels[sid].sessionSecret, role: channels[sid].isCreator ? 'creator' : 'receiver' };
-                            }) });
-                        }
-                    } else {
-                        statusDiv.textContent = '⏳ Серверы спят. Пробуем...';
-                        setTimeout(checkServers, 5000);
-                    }
-                } catch(e) { statusDiv.textContent = '⏳ Ошибка проверки серверов. Пробуем...'; setTimeout(checkServers, 5000); }
+           async function checkServers() {
+    try {
+        var renderPing = await apiCall(RENDER_SERVER, 'GET', '/ping');
+        var workersPing = await apiCall(WORKERS_URL, 'GET', '/ping');
+        
+        if (renderPing || workersPing) {
+            handshakeSecret = generateToken();
+            statusDiv.textContent = '✅ Готов (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
+            sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
+            
+            if(Object.keys(channels).length > 0) {
+                sendToParent({ 
+                    type: 'restored-channels', 
+                    channels: Object.keys(channels).map(function(sid) {
+                        return { 
+                            channelId: sid, 
+                            secret: channels[sid].sessionSecret, 
+                            role: channels[sid].isCreator ? 'creator' : 'receiver' 
+                        };
+                    }) 
+                });
             }
+        } else {
+            statusDiv.textContent = '⏳ Серверы спят. Пробуем...';
+            sendToParent({ type: 'error', text: 'Серверы не отвечают. Повторная попытка через 5 сек.' });
+            setTimeout(checkServers, 5000);
+        }
+    } catch(e) {
+        console.error('Check servers error:', e.message);
+        statusDiv.textContent = '⏳ Ошибка проверки серверов. Пробуем...';
+        sendToParent({ type: 'error', text: 'Ошибка связи с серверами: ' + e.message });
+        setTimeout(checkServers, 5000);
+    }
+}
 
             async function createSession() {
-                if(isCreatingSession) { sendToParent({ type: 'error', text: '⚒ Стрела уже куётся.' }); return; }
+    var now = Date.now();
+    if (now - lastBeaconAttempt < beaconCooldown) {
+        sendToParent({ type: 'error', text: '⏳ Подождите ' + Math.ceil((beaconCooldown - (now - lastBeaconAttempt))/1000) + ' сек. перед новой стрелой.' });
+        return;
+    }
+    lastBeaconAttempt = now;
+
+    if(isCreatingSession) { 
+         sendToParent({ type: 'error', text: '⚒ Стрела уже куётся.' }); return; }
                 if(!isPWA && Object.keys(channels).length >= 2) { sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' }); sendToParent({ type: 'install-prompt' }); return; }
                 if(Object.keys(channels).length >= MAX_CHANNELS) { sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' }); return; }
 
@@ -266,7 +301,13 @@
 
             function cancelSessionCreation() { if(createAbortController) { createAbortController.abort(); createAbortController = null; } isCreatingSession = false; }
 
-            async function acceptSession(sid, tempKey, server) {
+            async function acceptSession(sid, tempKey, server) {    
+                // Защита от частых попыток подключения
+    if (lastBeaconAttempt && Date.now() - lastBeaconAttempt < 5000) {
+        sendToParent({ type: 'error', text: '⏳ Подождите 5 сек. перед новой попыткой.' });
+        return;
+    }
+    lastBeaconAttempt = Date.now();
                 if(!sid || !tempKey) { sendToParent({ type: 'error', text: 'Неверная ссылка.' }); return; }
                 if(!isPWA && Object.keys(channels).length >= 2) { sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' }); sendToParent({ type: 'install-prompt' }); return; }
                 if(Object.keys(channels).length >= MAX_CHANNELS) { sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' колчанов.' }); return; }
