@@ -24,7 +24,6 @@
             var currentServer = 'render', isCreatingSession = false, createAbortController = null;
             var activePolls = {};
 
-            // Безопасное восстановление каналов (секреты всё ещё сохраняются, но это можно отключить позже)
             try {
                 var saved = localStorage.getItem('p2ppong_channels');
                 if (saved) {
@@ -466,7 +465,6 @@
             }
 
             window.addEventListener('message', async function(event) {
-                // Проверка origin – обязательно для безопасности
                 if (event.origin !== MAIN_ORIGIN) return;
                 
                 var data = event.data;
@@ -522,7 +520,6 @@
                 }
             });
 
-            // Инициализация
             statusDiv.textContent = '🏹 Запуск P2PPong...';
             checkServers();
         })();
