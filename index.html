@@ -3,288 +3,589 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>P2PPong v3.1</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="../assets/avatars/001-.png">
     <style>
         html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
         body { display: flex; justify-content: center; align-items: center; }
         .container { width: 100%; max-width: 600px; padding: 20px; box-sizing: border-box; }
         #status { color: #888; font-size: 0.9em; margin: 5px 0; word-break: break-all; }
+        .error { color: #f44336; }
+        .success { color: #4caf50; }
+        .warning { color: #ff9800; }
     </style>
 </head>
 <body>
-<div class="container"><h3>P2PPong v3.1</h3><div id="status"></div></div>
+<div class="container">
+    <h3>🏹 P2PPong v3.1</h3>
+    <div id="status">Загрузка...</div>
+</div>
+
 <script>
-const RENDER_SERVER = 'https://p2ppong.onrender.com';
-const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
-let currentServer = 'render';
-const statusDiv = document.getElementById('status');
-const MY_ID = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
-const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-const MAX_CHANNELS = isPWA ? 20 : 2;
-let channels = {};
-let handshakeSecret = null;
-let pollIntervals = {};
+/**
+ * P2PPong v3.1 - Сигнальный сервер для RobinHood P2P
+ * Исправления:
+ * - Убран повторяющийся запрос favicon.ico
+ * - Добавлена обработка таймаутов
+ * - Улучшена обработка ошибок сети
+ * - Восстановление сессий при обрыве
+ */
+(function() {
+    'use strict';
 
-function generateToken() {
-    return crypto.randomUUID ? crypto.randomUUID() : 
-        Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
-}
-
-async function sha256(text) {
-    const data = new TextEncoder().encode(text);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hash))
-        .map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
-async function apiCall(method, path, body = null) {
-    const serverUrl = currentServer === 'workers' ? WORKERS_URL : RENDER_SERVER;
-    const ctrl = new AbortController();
-    const to = setTimeout(() => ctrl.abort(), 80000);
+    // ==================== КОНФИГУРАЦИЯ ====================
+    const RENDER_SERVER = 'https://p2ppong.onrender.com';
+    const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
     
-    try {
-        const options = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal };
-        if (body) options.body = JSON.stringify(body);
-        const res = await fetch(serverUrl + path, options);
-        clearTimeout(to);
-        if (res.ok) return await res.json();
-        return null;
-    } catch(e) {
-        clearTimeout(to);
+    // ==================== СОСТОЯНИЕ ====================
+    let currentServer = 'render';
+    let channels = {};
+    let handshakeSecret = null;
+    let pollIntervals = {};
+    let reconnectTimers = {};
+    
+    const MY_ID = crypto.randomUUID ? crypto.randomUUID() : 
+        Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                  navigator.standalone || false;
+    const MAX_CHANNELS = isPWA ? 20 : 2;
+
+    // ==================== DOM ====================
+    const statusDiv = document.getElementById('status');
+
+    // ==================== УТИЛИТЫ ====================
+    function generateToken() {
+        if (crypto.randomUUID) return crypto.randomUUID();
+        const arr = new Uint8Array(16);
+        crypto.getRandomValues(arr);
+        return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    async function sha256(text) {
+        const data = new TextEncoder().encode(text);
+        const hash = await crypto.subtle.digest('SHA-256', data);
+        return Array.from(new Uint8Array(hash))
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function setStatus(text, type = '') {
+        if (statusDiv) {
+            statusDiv.textContent = text;
+            statusDiv.className = type;
+        }
+        console.log('[P2PPong]', text);
+    }
+
+    // ==================== СЕТЕВЫЕ ЗАПРОСЫ ====================
+    async function apiCall(method, path, body = null, retries = 2) {
+        const serverUrl = currentServer === 'workers' ? WORKERS_URL : RENDER_SERVER;
+        
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            const ctrl = new AbortController();
+            const timeout = setTimeout(() => ctrl.abort(), 15000); // 15 секунд таймаут
+            
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' },
+                    signal: ctrl.signal
+                };
+                if (body) options.body = JSON.stringify(body);
+                
+                const res = await fetch(serverUrl + path, options);
+                clearTimeout(timeout);
+                
+                if (!res.ok) {
+                    if (attempt < retries) {
+                        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+                        continue;
+                    }
+                    return null;
+                }
+                
+                return await res.json();
+            } catch (e) {
+                clearTimeout(timeout);
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+                    continue;
+                }
+                console.error('[P2PPong] API error:', e.message);
+                return null;
+            }
+        }
         return null;
     }
-}
 
-function sendToParent(msg) {
-    if (window.parent && window.parent !== window) {
-        window.parent.postMessage(msg, '*');
+    // ==================== ОТПРАВКА В РОДИТЕЛЬСКОЕ ОКНО ====================
+    function sendToParent(msg) {
+        if (window.parent && window.parent !== window) {
+            try {
+                window.parent.postMessage(msg, '*');
+            } catch (e) {
+                console.error('[P2PPong] postMessage error:', e);
+            }
+        }
     }
-}
 
-// Простой XOR для обратной совместимости (НЕ ИСПОЛЬЗУЕТСЯ для новых E2EE каналов)
-function encryptLegacy(text, key) {
-    const enc = new TextEncoder().encode(text);
-    const keyBytes = new TextEncoder().encode(key);
-    const out = new Uint8Array(enc.length);
-    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-    return btoa(String.fromCharCode(...out));
-}
+    // ==================== ШИФРОВАНИЕ (XOR - для обратной совместимости) ====================
+    function encryptLegacy(text, key) {
+        const enc = new TextEncoder().encode(text);
+        const keyBytes = new TextEncoder().encode(key);
+        const out = new Uint8Array(enc.length);
+        for (let i = 0; i < enc.length; i++) {
+            out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+        }
+        return btoa(String.fromCharCode(...out));
+    }
 
-function decryptLegacy(text, key) {
-    const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
-    const keyBytes = new TextEncoder().encode(key);
-    const out = new Uint8Array(enc.length);
-    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-    return new TextDecoder().decode(out);
-}
+    function decryptLegacy(text, key) {
+        try {
+            const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
+            const keyBytes = new TextEncoder().encode(key);
+            const out = new Uint8Array(enc.length);
+            for (let i = 0; i < enc.length; i++) {
+                out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+            }
+            return new TextDecoder().decode(out);
+        } catch (e) {
+            return null;
+        }
+    }
 
-function startPolling(sid) {
-    if (pollIntervals[sid]) return;
-    let lastTime = Date.now();
-    pollIntervals[sid] = setInterval(async () => {
-        const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
-        if (res && res.messages) {
-            res.messages.forEach(m => {
-                const ch = channels[sid];
-                if (ch && ch.sessionSecret) {
-                    // Пытаемся расшифровать для обратной совместимости
-                    // Но новые E2EE сообщения пройдут как есть
-                    try {
-                        const decrypted = decryptLegacy(m.packet, ch.sessionSecret);
-                        const parsed = JSON.parse(decrypted);
-                        if (parsed.sender === MY_ID) {
-                            lastTime = Math.max(lastTime, m.time);
-                            return;
+    // ==================== ПОЛЛИНГ ====================
+    function startPolling(sid) {
+        if (pollIntervals[sid]) return;
+        
+        let lastTime = Date.now();
+        let consecutiveErrors = 0;
+        
+        const poll = async () => {
+            try {
+                const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
+                
+                if (!res) {
+                    consecutiveErrors++;
+                    if (consecutiveErrors > 5) {
+                        setStatus('⚠ Проблемы с сетью...', 'warning');
+                        consecutiveErrors = 0;
+                    }
+                    return;
+                }
+                
+                consecutiveErrors = 0;
+                
+                if (res.messages && Array.isArray(res.messages)) {
+                    for (const m of res.messages) {
+                        const ch = channels[sid];
+                        if (!ch || !ch.sessionSecret) continue;
+                        
+                        let text = m.packet;
+                        
+                        // Пробуем расшифровать (для старых клиентов)
+                        try {
+                            const decrypted = decryptLegacy(m.packet, ch.sessionSecret);
+                            if (decrypted) {
+                                const parsed = JSON.parse(decrypted);
+                                if (parsed.sender === MY_ID) {
+                                    lastTime = Math.max(lastTime, m.time);
+                                    continue;
+                                }
+                                text = parsed.text;
+                            }
+                        } catch (err) {
+                            // Не удалось расшифровать - отправляем как есть (для E2EE)
                         }
+                        
                         sendToParent({
                             type: 'message',
-                            text: parsed.text,
+                            text: text,
                             sender: 'Друг',
                             channelId: sid
                         });
-                    } catch(err) {
-                        // Если не удалось расшифровать, отправляем как есть (для E2EE)
-                        sendToParent({
-                            type: 'message',
-                            text: m.packet,
-                            sender: 'Друг',
-                            channelId: sid
-                        });
+                        
+                        lastTime = Math.max(lastTime, m.time);
                     }
                 }
-                lastTime = Math.max(lastTime, m.time);
+            } catch (e) {
+                console.error('[P2PPong] Poll error:', e);
+            }
+        };
+        
+        // Первый запуск сразу, затем интервал
+        poll();
+        pollIntervals[sid] = setInterval(poll, 6000);
+    }
+
+    function stopPolling(sid) {
+        if (pollIntervals[sid]) {
+            clearInterval(pollIntervals[sid]);
+            delete pollIntervals[sid];
+        }
+    }
+
+    function stopAllPolling() {
+        Object.keys(pollIntervals).forEach(stopPolling);
+    }
+
+    // ==================== ПРОВЕРКА СЕРВЕРА ====================
+    async function checkServer() {
+        setStatus('Проверка сервера...');
+        
+        const ping = await apiCall('GET', '/ping');
+        
+        if (ping) {
+            handshakeSecret = generateToken();
+            const channelCount = Object.keys(channels).length;
+            setStatus(`Готов (${channelCount}/${MAX_CHANNELS})`, 'success');
+            
+            sendToParent({ 
+                type: 'pong-ready', 
+                handshake: handshakeSecret 
             });
-        }
-    }, 6000);
-}
-
-function stopPolling(sid) {
-    if (pollIntervals[sid]) {
-        clearInterval(pollIntervals[sid]);
-        delete pollIntervals[sid];
-    }
-}
-
-async function checkRender() {
-    statusDiv.textContent = 'Проверка сервера...';
-    const ping = await apiCall('GET', '/ping');
-    if (ping) {
-        handshakeSecret = generateToken();
-        statusDiv.textContent = 'Готов (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-        sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-    } else {
-        statusDiv.textContent = 'Сервер не отвечает';
-        setTimeout(checkRender, 5000);
-    }
-}
-
-async function createSession() {
-    if (!isPWA && Object.keys(channels).length >= 2) {
-        sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-        sendToParent({ type: 'install-prompt' });
-        return;
-    }
-    if (Object.keys(channels).length >= MAX_CHANNELS) {
-        sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' чатов.' });
-        return;
-    }
-    statusDiv.textContent = 'Создание маяка...';
-    const tempKey = generateToken();
-    const beaconRes = await apiCall('POST', '/beacon', { tempKey: tempKey });
-    if (!beaconRes || !beaconRes.sessionId) {
-        sendToParent({ type: 'error', text: 'Сервер не отвечает' });
-        return;
-    }
-    const sid = beaconRes.sessionId;
-    const sessionSecret = await sha256(tempKey);
-    channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true };
-    
-    // Безопасная ссылка: НЕ передаем ключ в URL для новых клиентов
-    // Вместо этого используем sessionId + fingerprint
-    const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid;
-    sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
-    sendToParent({ type: 'status', text: 'Ожидаю получателя...' });
-    
-    let matched = false;
-    const startTime = Date.now();
-    while (Date.now() - startTime < 90000) {
-        const check = await apiCall('GET', '/beacon?id=' + sid);
-        if (check && check.matched) {
-            matched = true;
-            break;
-        }
-        await new Promise(r => setTimeout(r, 6000));
-    }
-    if (!matched) {
-        delete channels[sid];
-        sendToParent({ type: 'error', text: 'Таймаут ожидания' });
-        return;
-    }
-    
-    channels[sid].status = 'open';
-    startPolling(sid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
-    statusDiv.textContent = 'Комната открыта (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-}
-
-async function acceptSession(sid, tempKey) {
-    if (!isPWA && Object.keys(channels).length >= 2) {
-        sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-        sendToParent({ type: 'install-prompt' });
-        return;
-    }
-    if (Object.keys(channels).length >= MAX_CHANNELS) {
-        sendToParent({ type: 'error', text: 'Максимум ' + MAX_CHANNELS + ' чатов.' });
-        return;
-    }
-    statusDiv.textContent = 'Поиск маяка...';
-    const findRes = await apiCall('POST', '/find', { tempKey: tempKey });
-    if (!findRes || findRes.status !== 'matched') {
-        sendToParent({ type: 'error', text: 'Маяк не найден' });
-        return;
-    }
-    const actualSid = findRes.sessionId;
-    const sessionSecret = await sha256(tempKey);
-    channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false };
-    startPolling(actualSid);
-    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' });
-    statusDiv.textContent = 'Комната открыта (' + Object.keys(channels).length + '/' + MAX_CHANNELS + ')';
-}
-
-async function restoreChannels() {
-    // Восстановление каналов из localStorage если есть
-    const savedChannels = JSON.parse(localStorage.getItem('robinhood_sessions') || '[]');
-    const restored = [];
-    for (const sc of savedChannels) {
-        const check = await apiCall('GET', '/beacon?id=' + sc.id);
-        if (check && check.matched) {
-            channels[sc.id] = { tempKey: sc.key, sessionSecret: sc.secret, status: 'open', isCreator: sc.creator };
-            startPolling(sc.id);
-            restored.push({ channelId: sc.id, secret: sc.secret, role: sc.creator ? 'creator' : 'receiver' });
+            
+            // Восстанавливаем сохраненные сессии
+            await restoreSessions();
+            
+            return true;
+        } else {
+            setStatus('Сервер не отвечает. Повтор через 5 сек...', 'error');
+            setTimeout(checkServer, 5000);
+            return false;
         }
     }
-    if (restored.length > 0) {
-        sendToParent({ type: 'restored-channels', channels: restored });
-    }
-}
 
-window.addEventListener('message', (event) => {
-    const data = event.data;
-    if (!data || !data.action) return;
-    
-    if (data.action === 'handshake') {
-        if (data.handshake === handshakeSecret) {
-            handshakeSecret = null;
-            sendToParent({ type: 'handshake-ok' });
-        }
-        return;
-    }
-    
-    if (data.action === 'send') {
-        const ch = channels[data.channelId];
-        if (!ch || !ch.sessionSecret) return;
-        if (data.secret !== ch.sessionSecret) {
-            sendToParent({ type: 'error', text: 'Неверный секрет' });
+    // ==================== СОЗДАНИЕ СЕССИИ ====================
+    async function createSession() {
+        const channelCount = Object.keys(channels).length;
+        
+        if (!isPWA && channelCount >= 2) {
+            sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
+            sendToParent({ type: 'install-prompt' });
             return;
         }
-        // Отправляем текст как есть (E2EE шифрование происходит на уровне RobinHood)
-        const packet = encryptLegacy(
-            JSON.stringify({ text: data.text, sender: MY_ID, time: Date.now() }),
-            ch.sessionSecret
-        );
-        apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
-        return;
+        
+        if (channelCount >= MAX_CHANNELS) {
+            sendToParent({ 
+                type: 'error', 
+                text: `Максимум ${MAX_CHANNELS} чатов. Удалите старые.` 
+            });
+            return;
+        }
+        
+        setStatus('Создание маяка...');
+        
+        const tempKey = generateToken();
+        const beaconRes = await apiCall('POST', '/beacon', { tempKey });
+        
+        if (!beaconRes || !beaconRes.sessionId) {
+            sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте позже.' });
+            setStatus('Ошибка создания', 'error');
+            return;
+        }
+        
+        const sid = beaconRes.sessionId;
+        const sessionSecret = await sha256(tempKey);
+        
+        channels[sid] = {
+            tempKey,
+            sessionSecret,
+            status: 'waiting',
+            isCreator: true,
+            createdAt: Date.now()
+        };
+        
+        // Сохраняем сессию
+        saveSessions();
+        
+        // Формируем ссылку (ключ передается отдельно через безопасный канал)
+        const link = window.location.origin + window.location.pathname.replace('P2PPong/index.html', '') + '?id=' + sid;
+        
+        sendToParent({
+            type: 'session-created',
+            sessionId: sid,
+            key: tempKey,
+            fullLink: link
+        });
+        
+        setStatus('Ожидание получателя... (90 сек)');
+        
+        // Ожидание подключения
+        let matched = false;
+        const startTime = Date.now();
+        const timeout = 90000; // 90 секунд
+        
+        while (Date.now() - startTime < timeout) {
+            const check = await apiCall('GET', `/beacon?id=${sid}`);
+            
+            if (check && check.matched) {
+                matched = true;
+                break;
+            }
+            
+            await new Promise(r => setTimeout(r, 5000));
+        }
+        
+        if (!matched) {
+            delete channels[sid];
+            saveSessions();
+            sendToParent({ type: 'error', text: 'Таймаут ожидания. Никто не подключился.' });
+            setStatus('Таймаут', 'warning');
+            return;
+        }
+        
+        channels[sid].status = 'open';
+        startPolling(sid);
+        saveSessions();
+        
+        sendToParent({
+            type: 'channel-open',
+            secret: sessionSecret,
+            channelId: sid,
+            role: 'creator'
+        });
+        
+        const newCount = Object.keys(channels).length;
+        setStatus(`Комната открыта (${newCount}/${MAX_CHANNELS})`, 'success');
     }
-    
-    if (data.server) {
-        currentServer = data.server;
-    }
-    
-    switch(data.action) {
-        case 'create':
-            createSession();
-            break;
-        case 'accept':
-            acceptSession(data.id, data.key);
-            break;
-        case 'cancel-create':
-            // Отмена создания (если поддерживается)
-            break;
-    }
-});
 
-// Сохранение сессий при закрытии
-window.addEventListener('beforeunload', () => {
-    const sessions = Object.entries(channels).map(([id, ch]) => ({
-        id,
-        key: ch.tempKey,
-        secret: ch.sessionSecret,
-        creator: ch.isCreator
-    }));
-    localStorage.setItem('robinhood_sessions', JSON.stringify(sessions));
-});
+    // ==================== ПРИНЯТИЕ СЕССИИ ====================
+    async function acceptSession(sid, tempKey) {
+        const channelCount = Object.keys(channels).length;
+        
+        if (!isPWA && channelCount >= 2) {
+            sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
+            sendToParent({ type: 'install-prompt' });
+            return;
+        }
+        
+        if (channelCount >= MAX_CHANNELS) {
+            sendToParent({ 
+                type: 'error', 
+                text: `Максимум ${MAX_CHANNELS} чатов.` 
+            });
+            return;
+        }
+        
+        // Проверяем, не подключены ли уже к этому каналу
+        if (channels[sid]) {
+            sendToParent({ type: 'error', text: 'Вы уже подключены к этому каналу.' });
+            return;
+        }
+        
+        setStatus('Поиск маяка...');
+        
+        const findRes = await apiCall('POST', '/find', { tempKey });
+        
+        if (!findRes || findRes.status !== 'matched') {
+            sendToParent({ type: 'error', text: 'Маяк не найден или истек.' });
+            setStatus('Маяк не найден', 'error');
+            return;
+        }
+        
+        const actualSid = findRes.sessionId || sid;
+        const sessionSecret = await sha256(tempKey);
+        
+        channels[actualSid] = {
+            tempKey,
+            sessionSecret,
+            status: 'open',
+            isCreator: false,
+            createdAt: Date.now()
+        };
+        
+        startPolling(actualSid);
+        saveSessions();
+        
+        sendToParent({
+            type: 'channel-open',
+            secret: sessionSecret,
+            channelId: actualSid,
+            role: 'receiver'
+        });
+        
+        const newCount = Object.keys(channels).length;
+        setStatus(`Комната открыта (${newCount}/${MAX_CHANNELS})`, 'success');
+    }
 
-checkRender();
+    // ==================== СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ СЕССИЙ ====================
+    function saveSessions() {
+        try {
+            const sessions = Object.entries(channels)
+                .filter(([_, ch]) => ch.status === 'open')
+                .map(([id, ch]) => ({
+                    id,
+                    key: ch.tempKey,
+                    secret: ch.sessionSecret,
+                    creator: ch.isCreator,
+                    createdAt: ch.createdAt
+                }));
+            localStorage.setItem('robinhood_pong_sessions', JSON.stringify(sessions));
+        } catch (e) {
+            console.error('[P2PPong] Save sessions error:', e);
+        }
+    }
+
+    async function restoreSessions() {
+        try {
+            const saved = localStorage.getItem('robinhood_pong_sessions');
+            if (!saved) return;
+            
+            const sessions = JSON.parse(saved);
+            const restored = [];
+            const now = Date.now();
+            const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 дней
+            
+            for (const sc of sessions) {
+                // Пропускаем слишком старые сессии
+                if (now - sc.createdAt > maxAge) continue;
+                
+                const check = await apiCall('GET', `/beacon?id=${sc.id}`);
+                
+                if (check && check.matched) {
+                    channels[sc.id] = {
+                        tempKey: sc.key,
+                        sessionSecret: sc.secret,
+                        status: 'open',
+                        isCreator: sc.creator,
+                        createdAt: sc.createdAt
+                    };
+                    
+                    startPolling(sc.id);
+                    restored.push({
+                        channelId: sc.id,
+                        secret: sc.secret,
+                        role: sc.creator ? 'creator' : 'receiver'
+                    });
+                }
+            }
+            
+            if (restored.length > 0) {
+                sendToParent({ type: 'restored-channels', channels: restored });
+                setStatus(`Восстановлено каналов: ${restored.length}`, 'success');
+            }
+            
+            saveSessions();
+        } catch (e) {
+            console.error('[P2PPong] Restore sessions error:', e);
+        }
+    }
+
+    // ==================== ОБРАБОТЧИК СООБЩЕНИЙ ====================
+    window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data || !data.action) return;
+        
+        // Проверка handshake
+        if (data.action === 'handshake') {
+            if (data.handshake === handshakeSecret) {
+                handshakeSecret = null;
+                sendToParent({ type: 'handshake-ok' });
+            }
+            return;
+        }
+        
+        // Отправка сообщения
+        if (data.action === 'send') {
+            const ch = channels[data.channelId];
+            if (!ch || !ch.sessionSecret) {
+                sendToParent({ type: 'error', text: 'Канал не найден.' });
+                return;
+            }
+            
+            if (data.secret !== ch.sessionSecret) {
+                sendToParent({ type: 'error', text: 'Неверный секрет канала.' });
+                return;
+            }
+            
+            // Отправляем на сервер
+            const packet = encryptLegacy(
+                JSON.stringify({
+                    text: data.text,
+                    sender: MY_ID,
+                    time: Date.now()
+                }),
+                ch.sessionSecret
+            );
+            
+            apiCall('POST', '/message', {
+                sessionId: data.channelId,
+                packet: packet
+            }).catch(() => {
+                sendToParent({ type: 'error', text: 'Ошибка отправки сообщения.' });
+            });
+            
+            return;
+        }
+        
+        // Смена сервера
+        if (data.server) {
+            currentServer = data.server;
+            setStatus(`Сервер: ${currentServer === 'workers' ? 'Workers' : 'Render'}`);
+            return;
+        }
+        
+        // Действия
+        switch (data.action) {
+            case 'create':
+                createSession();
+                break;
+                
+            case 'accept':
+                if (data.id && data.key) {
+                    acceptSession(data.id, data.key);
+                } else {
+                    sendToParent({ type: 'error', text: 'Неверные параметры подключения.' });
+                }
+                break;
+                
+            case 'cancel-create':
+                // Отмена ожидания (если поддерживается сервером)
+                setStatus('Готов', 'success');
+                break;
+                
+            default:
+                console.warn('[P2PPong] Unknown action:', data.action);
+        }
+    });
+
+    // ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
+    window.addEventListener('beforeunload', () => {
+        saveSessions();
+        stopAllPolling();
+    });
+
+    window.addEventListener('pagehide', () => {
+        saveSessions();
+    });
+
+    // Обработка видимости страницы (опрос только когда активно)
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            // Страница скрыта - останавливаем опрос для экономии
+            Object.keys(pollIntervals).forEach(sid => {
+                if (pollIntervals[sid]) {
+                    clearInterval(pollIntervals[sid]);
+                    delete pollIntervals[sid];
+                }
+            });
+        } else {
+            // Страница снова видна - возобновляем опрос
+            Object.keys(channels).forEach(sid => {
+                if (channels[sid].status === 'open' && !pollIntervals[sid]) {
+                    startPolling(sid);
+                }
+            });
+        }
+    });
+
+    // ==================== ЗАПУСК ====================
+    checkServer();
+
+})();
 </script>
 </body>
 </html>
