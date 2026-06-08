@@ -6,553 +6,899 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
-    <title>P2PPong v3.1</title>
-    <!-- ПРАВИЛЬНЫЙ ПУТЬ: из P2PPong/ поднимаемся в корень, затем в ROBINHOOD-P2P/assets/ -->
-    <link rel="icon" type="image/png" sizes="192x192" href="../ROBINHOOD-P2P/assets/avatars/001-.png">
+    <title>P2PPong v3.2</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
     <style>
-        html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
-        body { display: flex; justify-content: center; align-items: center; }
-        .container { width: 100%; max-width: 600px; padding: 20px; box-sizing: border-box; }
-        #status { color: #888; font-size: 0.9em; margin: 5px 0; word-break: break-all; }
-        .error { color: #f44336; }
-        .success { color: #4caf50; }
-        .warning { color: #ff9800; }
+        :root {
+            --bg-primary: #1a2a1f;
+            --bg-secondary: #0d1a0c;
+            --accent: #c4a24b;
+            --accent-light: #e8d5a3;
+            --text: #e8e2c7;
+            --text-bright: #f5e6b8;
+            --text-dim: #b8a87a;
+            --border: #c4a24b;
+            --btn-bg: rgba(196,162,75,0.15);
+            --btn-hover: rgba(196,162,75,0.3);
+            --robin-bg: rgba(50,70,40,0.9);
+            --robin-accent: #e8c97a;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        html, body { 
+            margin:0; padding:0; height:100%; 
+            font-family: 'Segoe UI', 'Inter', 'Georgia', serif;
+            overflow: hidden;
+        }
+        body {
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100dvh;
+            position: relative;
+        }
+        /* Фон из основного приложения */
+        body::before {
+            content: "";
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-image: url('https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/background.webp');
+            background-size: cover;
+            background-position: center 30%;
+            background-repeat: no-repeat;
+            z-index: 0;
+            opacity: 0.3;
+        }
+        body::after {
+            content: "";
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: radial-gradient(circle at 20% 30%, rgba(30,40,25,0.65), rgba(10,20,8,0.85));
+            z-index: 0;
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 420px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* Заголовок */
+        .header-section {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .header-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            background: linear-gradient(135deg, var(--accent-light), var(--accent));
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 4px;
+        }
+        .header-subtitle {
+            font-size: 0.65em;
+            color: var(--text-dim);
+        }
+
+        /* Robin Hood */
+        .robin-row {
+            background: var(--robin-bg);
+            border-left: 3px solid var(--robin-accent);
+            border-radius: 12px;
+            padding: 10px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+            backdrop-filter: blur(8px);
+        }
+        .robin-avatar {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            border: 2px solid var(--robin-accent);
+            flex-shrink: 0;
+        }
+        .robin-text {
+            font-weight: 700;
+            font-size: 0.8em;
+            color: var(--text-bright);
+            text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+        }
+
+        /* Статус */
+        .status-block {
+            background: rgba(20,30,18,0.9);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px;
+            margin-bottom: 12px;
+            text-align: center;
+        }
+        .status-main {
+            font-size: 0.85em;
+            color: var(--accent-light);
+            margin-bottom: 4px;
+        }
+        .status-sub {
+            font-size: 0.65em;
+            color: var(--text-dim);
+        }
+        .status-dot {
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        .status-dot.online { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+        .status-dot.offline { background: #f44336; }
+        .status-dot.checking { background: #ff9800; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+        /* Серверы */
+        .servers-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .server-card {
+            flex: 1;
+            background: rgba(20,30,18,0.85);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .server-card:hover {
+            background: var(--btn-hover);
+            border-color: var(--accent);
+        }
+        .server-card.active {
+            border-color: #4caf50;
+            background: rgba(76,175,80,0.1);
+        }
+        .server-name {
+            font-size: 0.8em;
+            font-weight: bold;
+            color: var(--accent-light);
+        }
+        .server-status {
+            font-size: 0.6em;
+            color: var(--text-dim);
+            margin-top: 2px;
+        }
+        .server-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 0.55em;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        .server-badge.free { background: rgba(255,152,0,0.2); color: #ff9800; }
+        .server-badge.active { background: rgba(76,175,80,0.2); color: #4caf50; }
+
+        /* Кнопки */
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+            font-family: inherit;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent), #b8903a);
+            color: #1a1f0f;
+            border-color: var(--accent);
+        }
+        .btn-primary:hover {
+            box-shadow: 0 0 20px rgba(196,162,75,0.4);
+            transform: translateY(-1px);
+        }
+        .btn-secondary {
+            background: var(--btn-bg);
+            color: var(--text);
+        }
+        .btn-secondary:hover {
+            background: var(--btn-hover);
+            border-color: var(--accent);
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* Инфо */
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.6em;
+            color: var(--text-dim);
+            margin-top: 8px;
+        }
+        .info-badge {
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.05);
+        }
+
+        /* Логи */
+        .log-area {
+            background: rgba(0,0,0,0.3);
+            border-radius: 8px;
+            padding: 8px;
+            margin-top: 10px;
+            max-height: 80px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 0.55em;
+            color: #666;
+        }
     </style>
 </head>
 <body>
-<div class="container">
-    <h3>P2PPong v3.1</h3>
-    <div id="status">Загрузка...</div>
-</div>
+    <div class="container">
+        <div class="header-section">
+            <div class="header-title">🏹 P2PPong</div>
+            <div class="header-subtitle">Сигнальный сервер v3.2</div>
+        </div>
 
-<script>
-/**
- * P2PPong v3.1 - Сигнальный сервер для RobinHood P2P
- * Пути исправлены: favicon использует ../ROBINHOOD-P2P/assets/
- */
-(function() {
-    'use strict';
+        <div class="robin-row">
+            <img src="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/231-icon-11433690.png" class="robin-avatar" alt="Robin">
+            <div>
+                <div style="font-weight:900;font-size:0.85em;">Robin Hood</div>
+                <div class="robin-text" id="robin-message">Сервер готов к бою!</div>
+            </div>
+        </div>
 
-    // ==================== КОНФИГУРАЦИЯ ====================
-    const RENDER_SERVER = 'https://p2ppong.onrender.com';
-    const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
-    
-    // ==================== СОСТОЯНИЕ ====================
-    let currentServer = 'render';
-    let channels = {};
-    let handshakeSecret = null;
-    let pollIntervals = {};
-    
-    const MY_ID = crypto.randomUUID ? crypto.randomUUID() : 
-        Math.random().toString(36).substring(2) + Date.now().toString(36);
-    const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
-                  navigator.standalone || false;
-    const MAX_CHANNELS = isPWA ? 20 : 2;
+        <div class="status-block">
+            <div class="status-main">
+                <span class="status-dot checking" id="status-dot"></span>
+                <span id="status-main">Проверка серверов...</span>
+            </div>
+            <div class="status-sub" id="status-sub">Каналов: 0/2 (браузер)</div>
+        </div>
 
-    // ==================== DOM ====================
-    const statusDiv = document.getElementById('status');
+        <div class="servers-row">
+            <div class="server-card active" id="server-render" onclick="switchServer('render')">
+                <div class="server-name">🌐 Render</div>
+                <div class="server-status" id="render-status">Проверка...</div>
+                <div class="server-badge free">Бесплатный</div>
+            </div>
+            <div class="server-card" id="server-workers" onclick="switchServer('workers')">
+                <div class="server-name">⚡ Workers</div>
+                <div class="server-status" id="workers-status">Проверка...</div>
+                <div class="server-badge free">Бесплатный</div>
+            </div>
+        </div>
 
-    // ==================== УТИЛИТЫ ====================
-    function generateToken() {
-        if (crypto.randomUUID) return crypto.randomUUID();
-        const arr = new Uint8Array(16);
-        crypto.getRandomValues(arr);
-        return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-    }
+        <button class="btn btn-secondary" id="btn-check-servers" onclick="manualCheckServers()">
+            🔄 Проверить серверы
+        </button>
 
-    async function sha256(text) {
-        const data = new TextEncoder().encode(text);
-        const hash = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(hash))
-            .map(b => b.toString(16).padStart(2, '0')).join('');
-    }
+        <div class="info-row">
+            <span>ID: <span id="my-id-display">-</span></span>
+            <span class="info-badge" id="pwa-badge">Браузер</span>
+            <span>Каналы: <span id="channel-count">0/2</span></span>
+        </div>
 
-    function setStatus(text, type = '') {
-        if (statusDiv) {
-            statusDiv.textContent = text;
-            statusDiv.className = type;
-        }
-        console.log('[P2PPong]', text);
-    }
+        <div class="log-area" id="log-area"></div>
+    </div>
 
-    // ==================== СЕТЕВЫЕ ЗАПРОСЫ ====================
-    async function apiCall(method, path, body = null, retries = 2) {
-        const serverUrl = currentServer === 'workers' ? WORKERS_URL : RENDER_SERVER;
-        
-        for (let attempt = 0; attempt <= retries; attempt++) {
-            const ctrl = new AbortController();
-            const timeout = setTimeout(() => ctrl.abort(), 15000);
+    <script>
+        /**
+         * P2PPong v3.2 — адаптирован под бесплатные тарифы Render и Cloudflare Workers
+         * 
+         * Ограничения бесплатных тарифов:
+         * - Render: засыпает после 15 мин бездействия, 750 часов/мес
+         * - Workers: 100 000 запросов/день, 10 мс CPU/запрос
+         */
+        (function() {
+            'use strict';
+
+            // ==================== КОНФИГУРАЦИЯ ====================
+            const RENDER_SERVER = 'https://p2ppong.onrender.com';
+            const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
             
-            try {
-                const options = {
-                    method,
-                    headers: { 'Content-Type': 'application/json' },
-                    signal: ctrl.signal
-                };
-                if (body) options.body = JSON.stringify(body);
-                
-                const res = await fetch(serverUrl + path, options);
-                clearTimeout(timeout);
-                
-                if (!res.ok) {
-                    if (attempt < retries) {
-                        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
-                        continue;
-                    }
-                    return null;
-                }
-                
-                return await res.json();
-            } catch (e) {
-                clearTimeout(timeout);
-                if (attempt < retries) {
-                    await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
-                    continue;
-                }
-                console.error('[P2PPong] API error:', e.message);
-                return null;
+            // ==================== СОСТОЯНИЕ ====================
+            let currentServer = 'render';
+            let channels = {};
+            let handshakeSecret = null;
+            let pollIntervals = {};
+            let serverStatuses = { render: 'checking', workers: 'checking' };
+            
+            const MY_ID = crypto.randomUUID ? crypto.randomUUID() : 
+                Math.random().toString(36).substring(2) + Date.now().toString(36);
+            
+            const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
+                          navigator.standalone || false;
+            const MAX_CHANNELS_BROWSER = 2;
+            const MAX_CHANNELS_PWA = 20;
+
+            // ==================== DOM ====================
+            const $ = (s) => document.getElementById(s);
+            const robinMessage = $('robin-message');
+            const statusMain = $('status-main');
+            const statusSub = $('status-sub');
+            const statusDot = $('status-dot');
+            const renderStatus = $('render-status');
+            const workersStatus = $('workers-status');
+            const serverRender = $('server-render');
+            const serverWorkers = $('server-workers');
+            const myIdDisplay = $('my-id-display');
+            const pwaBadge = $('pwa-badge');
+            const channelCount = $('channel-count');
+            const logArea = $('log-area');
+
+            // ==================== УТИЛИТЫ ====================
+            function getMaxChannels() {
+                return isPWA ? MAX_CHANNELS_PWA : MAX_CHANNELS_BROWSER;
             }
-        }
-        return null;
-    }
 
-    // ==================== ОТПРАВКА В РОДИТЕЛЬСКОЕ ОКНО ====================
-    function sendToParent(msg) {
-        if (window.parent && window.parent !== window) {
-            try {
-                window.parent.postMessage(msg, '*');
-            } catch (e) {
-                console.error('[P2PPong] postMessage error:', e);
-            }
-        }
-    }
-
-    // ==================== ШИФРОВАНИЕ ====================
-    function encryptLegacy(text, key) {
-        const enc = new TextEncoder().encode(text);
-        const keyBytes = new TextEncoder().encode(key);
-        const out = new Uint8Array(enc.length);
-        for (let i = 0; i < enc.length; i++) {
-            out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-        }
-        return btoa(String.fromCharCode(...out));
-    }
-
-    function decryptLegacy(text, key) {
-        try {
-            const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
-            const keyBytes = new TextEncoder().encode(key);
-            const out = new Uint8Array(enc.length);
-            for (let i = 0; i < enc.length; i++) {
-                out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
-            }
-            return new TextDecoder().decode(out);
-        } catch (e) {
-            return null;
-        }
-    }
-
-    // ==================== ПОЛЛИНГ ====================
-    function startPolling(sid) {
-        if (pollIntervals[sid]) return;
-        
-        let lastTime = Date.now();
-        let consecutiveErrors = 0;
-        
-        const poll = async () => {
-            try {
-                const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
-                
-                if (!res) {
-                    consecutiveErrors++;
-                    if (consecutiveErrors > 5) {
-                        setStatus('Проблемы с сетью...', 'warning');
-                        consecutiveErrors = 0;
-                    }
-                    return;
+            function log(msg, type = 'info') {
+                console.log('[P2PPong]', msg);
+                if (logArea) {
+                    const time = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+                    const prefix = type === 'error' ? '❌' : type === 'success' ? '✅' : 'ℹ️';
+                    logArea.textContent = `[${time}] ${prefix} ${msg}\n` + logArea.textContent;
+                    // Ограничиваем 20 строками
+                    const lines = logArea.textContent.split('\n').slice(0, 20);
+                    logArea.textContent = lines.join('\n');
                 }
+            }
+
+            function setRobinMsg(msg) {
+                if (robinMessage) robinMessage.textContent = msg;
+            }
+
+            function updateStatusDisplay() {
+                const count = Object.keys(channels).length;
+                const max = getMaxChannels();
+                if (channelCount) channelCount.textContent = count + '/' + max;
+                if (pwaBadge) pwaBadge.textContent = isPWA ? 'PWA (20)' : 'Браузер (2)';
+                if (statusSub) statusSub.textContent = 'Каналов: ' + count + '/' + max + 
+                    ' | Сервер: ' + (currentServer === 'workers' ? 'Workers' : 'Render');
+            }
+
+            function updateServerUI() {
+                // Render
+                serverRender.classList.toggle('active', currentServer === 'render');
+                const rDot = serverStatuses.render === 'online' ? '🟢' : 
+                             serverStatuses.render === 'checking' ? '🟡' : '🔴';
+                if (renderStatus) renderStatus.textContent = rDot + ' ' + 
+                    (serverStatuses.render === 'online' ? 'Онлайн' : 
+                     serverStatuses.render === 'checking' ? 'Проверка...' : 'Офлайн');
+
+                // Workers
+                serverWorkers.classList.toggle('active', currentServer === 'workers');
+                const wDot = serverStatuses.workers === 'online' ? '🟢' : 
+                             serverStatuses.workers === 'checking' ? '🟡' : '🔴';
+                if (workersStatus) workersStatus.textContent = wDot + ' ' + 
+                    (serverStatuses.workers === 'online' ? 'Онлайн' : 
+                     serverStatuses.workers === 'checking' ? 'Проверка...' : 'Офлайн');
+
+                // Общий статус
+                const currentStatus = serverStatuses[currentServer];
+                statusDot.className = 'status-dot ' + 
+                    (currentStatus === 'online' ? 'online' : 
+                     currentStatus === 'checking' ? 'checking' : 'offline');
                 
-                consecutiveErrors = 0;
+                if (statusMain) {
+                    statusMain.textContent = currentStatus === 'online' ? 
+                        '✅ Сервер готов' : 
+                        currentStatus === 'checking' ? '🟡 Проверка...' : '❌ Сервер офлайн';
+                }
+            }
+
+            // ==================== API (адаптировано под бесплатные тарифы) ====================
+            async function apiCall(method, path, body = null, retries = 1) {
+                const serverUrl = currentServer === 'workers' ? WORKERS_URL : RENDER_SERVER;
                 
-                if (res.messages && Array.isArray(res.messages)) {
-                    for (const m of res.messages) {
-                        const ch = channels[sid];
-                        if (!ch || !ch.sessionSecret) continue;
+                for (let attempt = 0; attempt <= retries; attempt++) {
+                    const ctrl = new AbortController();
+                    // Таймаут: 10 секунд для Render (может просыпаться), 5 для Workers
+                    const timeoutMs = currentServer === 'workers' ? 5000 : 10000;
+                    const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
+                    
+                    try {
+                        const options = {
+                            method,
+                            headers: { 'Content-Type': 'application/json' },
+                            signal: ctrl.signal
+                        };
+                        if (body) options.body = JSON.stringify(body);
                         
-                        let text = m.packet;
+                        const res = await fetch(serverUrl + path, options);
+                        clearTimeout(timeout);
                         
-                        try {
-                            const decrypted = decryptLegacy(m.packet, ch.sessionSecret);
-                            if (decrypted) {
-                                const parsed = JSON.parse(decrypted);
-                                if (parsed.sender === MY_ID) {
-                                    lastTime = Math.max(lastTime, m.time);
-                                    continue;
-                                }
-                                text = parsed.text;
+                        if (!res.ok) {
+                            if (attempt < retries) {
+                                await new Promise(r => setTimeout(r, 2000));
+                                continue;
                             }
-                        } catch (err) {
-                            // Не удалось расшифровать - отправляем как есть (для E2EE)
+                            return null;
                         }
                         
-                        sendToParent({
-                            type: 'message',
-                            text: text,
-                            sender: 'Друг',
-                            channelId: sid
-                        });
-                        
-                        lastTime = Math.max(lastTime, m.time);
+                        return await res.json();
+                    } catch (e) {
+                        clearTimeout(timeout);
+                        if (attempt < retries) {
+                            await new Promise(r => setTimeout(r, 3000));
+                            continue;
+                        }
+                        log('Ошибка API: ' + e.message, 'error');
+                        return null;
                     }
                 }
-            } catch (e) {
-                console.error('[P2PPong] Poll error:', e);
+                return null;
             }
-        };
-        
-        poll();
-        pollIntervals[sid] = setInterval(poll, 6000);
-    }
 
-    function stopPolling(sid) {
-        if (pollIntervals[sid]) {
-            clearInterval(pollIntervals[sid]);
-            delete pollIntervals[sid];
-        }
-    }
-
-    function stopAllPolling() {
-        Object.keys(pollIntervals).forEach(stopPolling);
-    }
-
-    // ==================== ПРОВЕРКА СЕРВЕРА ====================
-    async function checkServer() {
-        setStatus('Проверка сервера...');
-        
-        const ping = await apiCall('GET', '/ping');
-        
-        if (ping) {
-            handshakeSecret = generateToken();
-            const channelCount = Object.keys(channels).length;
-            setStatus(`Готов (${channelCount}/${MAX_CHANNELS})`, 'success');
-            
-            sendToParent({ 
-                type: 'pong-ready', 
-                handshake: handshakeSecret 
-            });
-            
-            await restoreSessions();
-            return true;
-        } else {
-            setStatus('Сервер не отвечает. Повтор через 5 сек...', 'error');
-            setTimeout(checkServer, 5000);
-            return false;
-        }
-    }
-
-    // ==================== СОЗДАНИЕ СЕССИИ ====================
-    async function createSession() {
-        const channelCount = Object.keys(channels).length;
-        
-        if (!isPWA && channelCount >= 2) {
-            sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-            sendToParent({ type: 'install-prompt' });
-            return;
-        }
-        
-        if (channelCount >= MAX_CHANNELS) {
-            sendToParent({ type: 'error', text: `Максимум ${MAX_CHANNELS} чатов.` });
-            return;
-        }
-        
-        setStatus('Создание маяка...');
-        
-        const tempKey = generateToken();
-        const beaconRes = await apiCall('POST', '/beacon', { tempKey });
-        
-        if (!beaconRes || !beaconRes.sessionId) {
-            sendToParent({ type: 'error', text: 'Сервер не отвечает.' });
-            setStatus('Ошибка создания', 'error');
-            return;
-        }
-        
-        const sid = beaconRes.sessionId;
-        const sessionSecret = await sha256(tempKey);
-        
-        channels[sid] = {
-            tempKey,
-            sessionSecret,
-            status: 'waiting',
-            isCreator: true,
-            createdAt: Date.now()
-        };
-        
-        saveSessions();
-        
-        const link = window.location.origin + window.location.pathname.replace('P2PPong/index.html', '') + 'ROBINHOOD-P2P/?id=' + sid;
-        
-        sendToParent({
-            type: 'session-created',
-            sessionId: sid,
-            key: tempKey,
-            fullLink: link
-        });
-        
-        setStatus('Ожидание получателя... (90 сек)');
-        
-        let matched = false;
-        const startTime = Date.now();
-        const timeout = 90000;
-        
-        while (Date.now() - startTime < timeout) {
-            const check = await apiCall('GET', `/beacon?id=${sid}`);
-            
-            if (check && check.matched) {
-                matched = true;
-                break;
-            }
-            
-            await new Promise(r => setTimeout(r, 5000));
-        }
-        
-        if (!matched) {
-            delete channels[sid];
-            saveSessions();
-            sendToParent({ type: 'error', text: 'Таймаут ожидания.' });
-            setStatus('Таймаут', 'warning');
-            return;
-        }
-        
-        channels[sid].status = 'open';
-        startPolling(sid);
-        saveSessions();
-        
-        sendToParent({
-            type: 'channel-open',
-            secret: sessionSecret,
-            channelId: sid,
-            role: 'creator'
-        });
-        
-        setStatus(`Комната открыта (${Object.keys(channels).length}/${MAX_CHANNELS})`, 'success');
-    }
-
-    // ==================== ПРИНЯТИЕ СЕССИИ ====================
-    async function acceptSession(sid, tempKey) {
-        const channelCount = Object.keys(channels).length;
-        
-        if (!isPWA && channelCount >= 2) {
-            sendToParent({ type: 'error', text: 'Установите приложение для новых чатов.' });
-            sendToParent({ type: 'install-prompt' });
-            return;
-        }
-        
-        if (channelCount >= MAX_CHANNELS) {
-            sendToParent({ type: 'error', text: `Максимум ${MAX_CHANNELS} чатов.` });
-            return;
-        }
-        
-        if (channels[sid]) {
-            sendToParent({ type: 'error', text: 'Вы уже подключены к этому каналу.' });
-            return;
-        }
-        
-        setStatus('Поиск маяка...');
-        
-        const findRes = await apiCall('POST', '/find', { tempKey });
-        
-        if (!findRes || findRes.status !== 'matched') {
-            sendToParent({ type: 'error', text: 'Маяк не найден или истек.' });
-            setStatus('Маяк не найден', 'error');
-            return;
-        }
-        
-        const actualSid = findRes.sessionId || sid;
-        const sessionSecret = await sha256(tempKey);
-        
-        channels[actualSid] = {
-            tempKey,
-            sessionSecret,
-            status: 'open',
-            isCreator: false,
-            createdAt: Date.now()
-        };
-        
-        startPolling(actualSid);
-        saveSessions();
-        
-        sendToParent({
-            type: 'channel-open',
-            secret: sessionSecret,
-            channelId: actualSid,
-            role: 'receiver'
-        });
-        
-        setStatus(`Комната открыта (${Object.keys(channels).length}/${MAX_CHANNELS})`, 'success');
-    }
-
-    // ==================== СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ СЕССИЙ ====================
-    function saveSessions() {
-        try {
-            const sessions = Object.entries(channels)
-                .filter(([_, ch]) => ch.status === 'open')
-                .map(([id, ch]) => ({
-                    id,
-                    key: ch.tempKey,
-                    secret: ch.sessionSecret,
-                    creator: ch.isCreator,
-                    createdAt: ch.createdAt
-                }));
-            localStorage.setItem('robinhood_pong_sessions', JSON.stringify(sessions));
-        } catch (e) {
-            console.error('[P2PPong] Save sessions error:', e);
-        }
-    }
-
-    async function restoreSessions() {
-        try {
-            const saved = localStorage.getItem('robinhood_pong_sessions');
-            if (!saved) return;
-            
-            const sessions = JSON.parse(saved);
-            const restored = [];
-            const now = Date.now();
-            const maxAge = 7 * 24 * 60 * 60 * 1000;
-            
-            for (const sc of sessions) {
-                if (now - sc.createdAt > maxAge) continue;
+            // ==================== ПРОВЕРКА СЕРВЕРОВ ====================
+            async function checkServer(server) {
+                const prevServer = currentServer;
+                if (server) currentServer = server;
                 
-                const check = await apiCall('GET', `/beacon?id=${sc.id}`);
+                const serverName = currentServer === 'workers' ? 'Workers' : 'Render';
+                log('Проверка ' + serverName + '...');
                 
-                if (check && check.matched) {
-                    channels[sc.id] = {
-                        tempKey: sc.key,
-                        sessionSecret: sc.secret,
-                        status: 'open',
-                        isCreator: sc.creator,
-                        createdAt: sc.createdAt
-                    };
+                const ping = await apiCall('GET', '/ping');
+                
+                if (ping) {
+                    serverStatuses[currentServer] = 'online';
+                    log(serverName + ' онлайн', 'success');
                     
-                    startPolling(sc.id);
-                    restored.push({
-                        channelId: sc.id,
-                        secret: sc.secret,
-                        role: sc.creator ? 'creator' : 'receiver'
-                    });
-                }
-            }
-            
-            if (restored.length > 0) {
-                sendToParent({ type: 'restored-channels', channels: restored });
-                setStatus(`Восстановлено каналов: ${restored.length}`, 'success');
-            }
-            
-            saveSessions();
-        } catch (e) {
-            console.error('[P2PPong] Restore sessions error:', e);
-        }
-    }
-
-    // ==================== ОБРАБОТЧИК СООБЩЕНИЙ ====================
-    window.addEventListener('message', (event) => {
-        const data = event.data;
-        if (!data || !data.action) return;
-        
-        if (data.action === 'handshake') {
-            if (data.handshake === handshakeSecret) {
-                handshakeSecret = null;
-                sendToParent({ type: 'handshake-ok' });
-            }
-            return;
-        }
-        
-        if (data.action === 'send') {
-            const ch = channels[data.channelId];
-            if (!ch || !ch.sessionSecret) {
-                sendToParent({ type: 'error', text: 'Канал не найден.' });
-                return;
-            }
-            
-            if (data.secret !== ch.sessionSecret) {
-                sendToParent({ type: 'error', text: 'Неверный секрет канала.' });
-                return;
-            }
-            
-            const packet = encryptLegacy(
-                JSON.stringify({
-                    text: data.text,
-                    sender: MY_ID,
-                    time: Date.now()
-                }),
-                ch.sessionSecret
-            );
-            
-            apiCall('POST', '/message', {
-                sessionId: data.channelId,
-                packet: packet
-            }).catch(() => {
-                sendToParent({ type: 'error', text: 'Ошибка отправки сообщения.' });
-            });
-            
-            return;
-        }
-        
-        if (data.server) {
-            currentServer = data.server;
-            setStatus(`Сервер: ${currentServer === 'workers' ? 'Workers' : 'Render'}`);
-            return;
-        }
-        
-        switch (data.action) {
-            case 'create':
-                createSession();
-                break;
-                
-            case 'accept':
-                if (data.id && data.key) {
-                    acceptSession(data.id, data.key);
+                    if (!handshakeSecret || server !== prevServer) {
+                        handshakeSecret = generateToken();
+                        sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
+                    }
                 } else {
-                    sendToParent({ type: 'error', text: 'Неверные параметры подключения.' });
+                    serverStatuses[currentServer] = 'offline';
+                    log(serverName + ' не отвечает', 'error');
                 }
-                break;
                 
-            case 'cancel-create':
-                setStatus('Готов', 'success');
-                break;
-        }
-    });
+                if (server) currentServer = prevServer;
+                updateServerUI();
+                
+                return ping !== null;
+            }
 
-    // ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
-    window.addEventListener('beforeunload', () => {
-        saveSessions();
-        stopAllPolling();
-    });
+            async function checkAllServers() {
+                log('Полная проверка серверов...');
+                setRobinMsg('🔍 Проверяю серверы...');
+                
+                // Проверяем оба
+                await Promise.all([
+                    checkServer('render'),
+                    checkServer('workers')
+                ]);
+                
+                // Если текущий сервер офлайн, переключаемся на рабочий
+                if (serverStatuses[currentServer] === 'offline') {
+                    const otherServer = currentServer === 'render' ? 'workers' : 'render';
+                    if (serverStatuses[otherServer] === 'online') {
+                        switchServer(otherServer);
+                        log('Автопереключение на ' + otherServer, 'success');
+                    }
+                }
+                
+                updateServerUI();
+                const status = serverStatuses[currentServer];
+                setRobinMsg(status === 'online' ? '✅ Сервер готов!' : '⚠ Все серверы офлайн');
+            }
 
-    window.addEventListener('pagehide', () => {
-        saveSessions();
-    });
+            function switchServer(server) {
+                if (server === currentServer) return;
+                
+                log('Переключение на ' + (server === 'workers' ? 'Workers' : 'Render') + '...');
+                currentServer = server;
+                
+                // Сохраняем выбор
+                try { localStorage.setItem('robinhood_server', currentServer); } catch(e) {}
+                
+                // Переподключаемся
+                stopAllPolling();
+                handshakeSecret = null;
+                
+                // Уведомляем родителя
+                sendToParent({ server: currentServer });
+                
+                // Проверяем новый сервер
+                checkServer().then(() => {
+                    if (serverStatuses[currentServer] === 'online') {
+                        // Восстанавливаем каналы
+                        restoreSessions();
+                    }
+                });
+                
+                updateServerUI();
+                updateStatusDisplay();
+            }
 
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            Object.keys(pollIntervals).forEach(sid => {
+            function manualCheckServers() {
+                checkAllServers();
+            }
+
+            // ==================== ГЕНЕРАЦИЯ ====================
+            function generateToken() {
+                return crypto.randomUUID ? crypto.randomUUID() : 
+                    Math.random().toString(36).substring(2) + Math.random().toString(36).substring(2);
+            }
+
+            async function sha256(text) {
+                const data = new TextEncoder().encode(text);
+                const hash = await crypto.subtle.digest('SHA-256', data);
+                return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
+            }
+
+            // ==================== ОТПРАВКА РОДИТЕЛЮ ====================
+            function sendToParent(msg) {
+                if (window.parent && window.parent !== window) {
+                    try {
+                        window.parent.postMessage(msg, '*');
+                    } catch (e) {
+                        log('Ошибка postMessage', 'error');
+                    }
+                }
+            }
+
+            // ==================== ПОЛЛИНГ (оптимизирован для бесплатных тарифов) ====================
+            function startPolling(sid) {
+                if (pollIntervals[sid]) return;
+                
+                let lastTime = Date.now();
+                let pollCount = 0;
+                
+                // Для Render: более редкий поллинг чтобы не нагружать бесплатный тариф
+                // Для Workers: чаще, но в пределах лимита
+                const interval = currentServer === 'workers' ? 4000 : 8000;
+                
+                const poll = async () => {
+                    pollCount++;
+                    
+                    // Лимит запросов для Workers (100k/день ≈ 1.15/сек)
+                    // Пропускаем каждый 3-й опрос если каналов много
+                    if (currentServer === 'workers' && Object.keys(channels).length > 5 && pollCount % 3 !== 0) {
+                        return;
+                    }
+                    
+                    try {
+                        const res = await apiCall('GET', `/message?id=${sid}&since=${lastTime}`);
+                        
+                        if (!res) return;
+                        
+                        if (res.messages && Array.isArray(res.messages)) {
+                            for (const m of res.messages) {
+                                const ch = channels[sid];
+                                if (!ch || !ch.sessionSecret) continue;
+                                
+                                let text = m.packet;
+                                try {
+                                    const decrypted = decryptLegacy(m.packet, ch.sessionSecret);
+                                    if (decrypted) {
+                                        const parsed = JSON.parse(decrypted);
+                                        if (parsed.sender === MY_ID) {
+                                            lastTime = Math.max(lastTime, m.time);
+                                            continue;
+                                        }
+                                        text = parsed.text;
+                                    }
+                                } catch (err) {}
+                                
+                                sendToParent({
+                                    type: 'message',
+                                    text: text,
+                                    sender: 'Друг',
+                                    channelId: sid
+                                });
+                                lastTime = Math.max(lastTime, m.time);
+                            }
+                        }
+                    } catch (e) {
+                        // Тихая ошибка
+                    }
+                };
+                
+                poll();
+                pollIntervals[sid] = setInterval(poll, interval);
+            }
+
+            function stopPolling(sid) {
                 if (pollIntervals[sid]) {
                     clearInterval(pollIntervals[sid]);
                     delete pollIntervals[sid];
                 }
-            });
-        } else {
-            Object.keys(channels).forEach(sid => {
-                if (channels[sid].status === 'open' && !pollIntervals[sid]) {
-                    startPolling(sid);
+            }
+
+            function stopAllPolling() {
+                Object.keys(pollIntervals).forEach(stopPolling);
+            }
+
+            // ==================== ШИФРОВАНИЕ ====================
+            function encryptLegacy(text, key) {
+                const enc = new TextEncoder().encode(text);
+                const keyBytes = new TextEncoder().encode(key);
+                const out = new Uint8Array(enc.length);
+                for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+                return btoa(String.fromCharCode(...out));
+            }
+
+            function decryptLegacy(text, key) {
+                try {
+                    const enc = Uint8Array.from(atob(text), c => c.charCodeAt(0));
+                    const keyBytes = new TextEncoder().encode(key);
+                    const out = new Uint8Array(enc.length);
+                    for (let i = 0; i < enc.length; i++) out[i] = enc[i] ^ keyBytes[i % keyBytes.length];
+                    return new TextDecoder().decode(out);
+                } catch (e) { return null; }
+            }
+
+            // ==================== СЕССИИ ====================
+            async function createSession() {
+                const currentCount = Object.keys(channels).length;
+                const max = getMaxChannels();
+                
+                if (currentCount >= max) {
+                    sendToParent({ 
+                        type: 'error', 
+                        text: isPWA ? 
+                            'Максимум ' + max + ' каналов. Удалите старые.' : 
+                            'Максимум ' + max + ' каналов в браузере. Установите приложение для 20.' 
+                    });
+                    if (!isPWA) sendToParent({ type: 'install-prompt' });
+                    return;
+                }
+                
+                log('Создание маяка...');
+                setRobinMsg('⚒ Куём стрелу...');
+                
+                const tempKey = generateToken();
+                const beaconRes = await apiCall('POST', '/beacon', { tempKey });
+                
+                if (!beaconRes || !beaconRes.sessionId) {
+                    sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте другой.' });
+                    log('Ошибка создания маяка', 'error');
+                    return;
+                }
+                
+                const sid = beaconRes.sessionId;
+                const sessionSecret = await sha256(tempKey);
+                
+                channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true, createdAt: Date.now() };
+                
+                const link = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid;
+                
+                sendToParent({
+                    type: 'session-created',
+                    sessionId: sid,
+                    key: tempKey,
+                    fullLink: link
+                });
+                
+                log('Маяк создан: ' + sid.substring(0, 8) + '...', 'success');
+                setRobinMsg('⏳ Ожидание лучника... (90 сек)');
+                updateStatusDisplay();
+                
+                // Ожидание с таймаутом
+                let matched = false;
+                const startTime = Date.now();
+                const timeout = 90000;
+                
+                while (Date.now() - startTime < timeout) {
+                    const check = await apiCall('GET', `/beacon?id=${sid}`);
+                    if (check && check.matched) { matched = true; break; }
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+                
+                if (!matched) {
+                    delete channels[sid];
+                    saveSessions();
+                    sendToParent({ type: 'error', text: 'Таймаут ожидания.' });
+                    setRobinMsg('⏰ Никто не подключился');
+                    updateStatusDisplay();
+                    return;
+                }
+                
+                channels[sid].status = 'open';
+                startPolling(sid);
+                saveSessions();
+                
+                sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: sid, role: 'creator' });
+                log('Канал открыт!', 'success');
+                setRobinMsg('✅ Колчан открыт!');
+                updateStatusDisplay();
+            }
+
+            async function acceptSession(sid, tempKey) {
+                const currentCount = Object.keys(channels).length;
+                
+                if (currentCount >= getMaxChannels()) {
+                    sendToParent({ type: 'error', text: 'Максимум каналов достигнут.' });
+                    if (!isPWA) sendToParent({ type: 'install-prompt' });
+                    return;
+                }
+                
+                if (channels[sid]) {
+                    sendToParent({ type: 'error', text: 'Вы уже в этом канале.' });
+                    return;
+                }
+                
+                log('Поиск маяка...');
+                setRobinMsg('🔍 Ищу маяк...');
+                
+                const findRes = await apiCall('POST', '/find', { tempKey });
+                
+                if (!findRes || findRes.status !== 'matched') {
+                    sendToParent({ type: 'error', text: 'Маяк не найден.' });
+                    setRobinMsg('⚠ Маяк не найден');
+                    return;
+                }
+                
+                const actualSid = findRes.sessionId || sid;
+                const sessionSecret = await sha256(tempKey);
+                
+                channels[actualSid] = { tempKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() };
+                startPolling(actualSid);
+                saveSessions();
+                
+                sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' });
+                log('Подключено к каналу!', 'success');
+                setRobinMsg('✅ Подключено!');
+                updateStatusDisplay();
+            }
+
+            // ==================== СОХРАНЕНИЕ ====================
+            function saveSessions() {
+                try {
+                    const sessions = Object.entries(channels)
+                        .filter(([_, ch]) => ch.status === 'open')
+                        .map(([id, ch]) => ({ id, key: ch.tempKey, secret: ch.sessionSecret, creator: ch.isCreator, createdAt: ch.createdAt }));
+                    localStorage.setItem('robinhood_pong_sessions', JSON.stringify(sessions));
+                } catch (e) {}
+            }
+
+            async function restoreSessions() {
+                try {
+                    const saved = localStorage.getItem('robinhood_pong_sessions');
+                    if (!saved) return;
+                    
+                    const sessions = JSON.parse(saved);
+                    const restored = [];
+                    const now = Date.now();
+                    const maxAge = 7 * 24 * 60 * 60 * 1000;
+                    
+                    for (const sc of sessions) {
+                        if (now - sc.createdAt > maxAge) continue;
+                        
+                        const check = await apiCall('GET', `/beacon?id=${sc.id}`);
+                        if (check && check.matched) {
+                            channels[sc.id] = { tempKey: sc.key, sessionSecret: sc.secret, status: 'open', isCreator: sc.creator, createdAt: sc.createdAt };
+                            startPolling(sc.id);
+                            restored.push({ channelId: sc.id, secret: sc.secret, role: sc.creator ? 'creator' : 'receiver' });
+                        }
+                    }
+                    
+                    if (restored.length > 0) {
+                        sendToParent({ type: 'restored-channels', channels: restored });
+                        log('Восстановлено каналов: ' + restored.length, 'success');
+                    }
+                    
+                    updateStatusDisplay();
+                } catch (e) {
+                    log('Ошибка восстановления', 'error');
+                }
+            }
+
+            // ==================== ОБРАБОТЧИК СООБЩЕНИЙ ====================
+            window.addEventListener('message', (event) => {
+                const data = event.data;
+                if (!data || !data.action) return;
+                
+                if (data.action === 'handshake') {
+                    if (data.handshake === handshakeSecret) {
+                        handshakeSecret = null;
+                        sendToParent({ type: 'handshake-ok' });
+                        log('Handshake OK', 'success');
+                    }
+                    return;
+                }
+                
+                if (data.action === 'send') {
+                    const ch = channels[data.channelId];
+                    if (!ch || !ch.sessionSecret) {
+                        sendToParent({ type: 'error', text: 'Канал не найден.' });
+                        return;
+                    }
+                    if (data.secret !== ch.sessionSecret) {
+                        sendToParent({ type: 'error', text: 'Неверный секрет.' });
+                        return;
+                    }
+                    
+                    const packet = encryptLegacy(
+                        JSON.stringify({ text: data.text, sender: MY_ID, time: Date.now() }),
+                        ch.sessionSecret
+                    );
+                    
+                    apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
+                    return;
+                }
+                
+                if (data.server && data.server !== currentServer) {
+                    switchServer(data.server);
+                    return;
+                }
+                
+                switch (data.action) {
+                    case 'create': createSession(); break;
+                    case 'accept': if (data.id && data.key) acceptSession(data.id, data.key); break;
+                    case 'cancel-create': setRobinMsg('🏹 Готов'); break;
                 }
             });
-        }
-    });
 
-    // ==================== ЗАПУСК ====================
-    checkServer();
+            // ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
+            window.addEventListener('beforeunload', () => {
+                saveSessions();
+                stopAllPolling();
+            });
 
-})();
-</script>
+            document.addEventListener('visibilitychange', () => {
+                if (document.hidden) {
+                    // Приостанавливаем поллинг для экономии
+                    Object.keys(pollIntervals).forEach(stopPolling);
+                } else {
+                    // Возобновляем
+                    Object.keys(channels).forEach(sid => {
+                        if (channels[sid].status === 'open') startPolling(sid);
+                    });
+                    // Проверяем серверы
+                    checkAllServers();
+                }
+            });
+
+            // ==================== ИНИЦИАЛИЗАЦИЯ ====================
+            async function init() {
+                log('P2PPong v3.2 загружен');
+                
+                // Показываем ID
+                if (myIdDisplay) myIdDisplay.textContent = MY_ID.substring(0, 8) + '...';
+                
+                // Загружаем сохранённый сервер
+                const savedServer = localStorage.getItem('robinhood_server');
+                if (savedServer && (savedServer === 'render' || savedServer === 'workers')) {
+                    currentServer = savedServer;
+                }
+                
+                updateServerUI();
+                updateStatusDisplay();
+                
+                // Проверяем серверы
+                await checkAllServers();
+                
+                setRobinMsg('✅ Сервер готов!');
+            }
+
+            // Глобальная функция для кнопок
+            window.switchServer = switchServer;
+            window.manualCheckServers = manualCheckServers;
+
+            init();
+        })();
+    </script>
 </body>
 </html>
