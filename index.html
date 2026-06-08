@@ -18,6 +18,8 @@
 <div class="container"><h3>P2PPong v3.0</h3><div id="status"></div></div>
 <script>
 const RENDER_SERVER = 'https://p2ppong.onrender.com';
+const WORKERS_URL = 'https://robincall.stephanclaps-491.workers.dev';
+let currentServer = 'render';   // по умолчанию Render, будет переключаться из RobinHood
 const statusDiv = document.getElementById('status');
 const MY_ID = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2);
 const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
@@ -34,12 +36,15 @@ async function sha256(text) {
     return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-async function apiCall(method, path, body = null) {
-    const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 80000);
+    async function apiCall(method, path, body = null) {
+    const serverUrl = currentServer === 'workers' ? WORKERS_URL : RENDER_SERVER;
+    const ctrl = new AbortController();
+        const to = setTimeout(() => ctrl.abort(), 80000);
+    
     try {
         const options = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal };
         if (body) options.body = JSON.stringify(body);
-        const res = await fetch(RENDER_SERVER + path, options); clearTimeout(to);
+        const res = await fetch(serverUrl + path, options); clearTimeout(to);
         if (res.ok) return await res.json(); return null;
     } catch(e) { clearTimeout(to); return null; }
 }
@@ -161,6 +166,7 @@ window.addEventListener('message', (event) => {
         apiCall('POST', '/message', { sessionId: data.channelId, packet: packet });
         return;
     }
+    if (data.server) { currentServer = data.server; }
     switch(data.action) { case 'create': createSession(); break; case 'accept': acceptSession(data.id, data.key); break; }
 });
 
