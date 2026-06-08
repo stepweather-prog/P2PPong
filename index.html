@@ -7,7 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>P2PPong v3.1</title>
-    <link rel="icon" type="image/png" sizes="192x192" href="../assets/avatars/001-.png">
+    <!-- ПРАВИЛЬНЫЙ ПУТЬ: из P2PPong/ поднимаемся в корень, затем в ROBINHOOD-P2P/assets/ -->
+    <link rel="icon" type="image/png" sizes="192x192" href="../ROBINHOOD-P2P/assets/avatars/001-.png">
     <style>
         html, body { margin: 0; padding: 0; height: 100%; background: #121212; color: #eee; font-family: sans-serif; }
         body { display: flex; justify-content: center; align-items: center; }
@@ -20,18 +21,14 @@
 </head>
 <body>
 <div class="container">
-    <h3>🏹 P2PPong v3.1</h3>
+    <h3>P2PPong v3.1</h3>
     <div id="status">Загрузка...</div>
 </div>
 
 <script>
 /**
  * P2PPong v3.1 - Сигнальный сервер для RobinHood P2P
- * Исправления:
- * - Убран повторяющийся запрос favicon.ico
- * - Добавлена обработка таймаутов
- * - Улучшена обработка ошибок сети
- * - Восстановление сессий при обрыве
+ * Пути исправлены: favicon использует ../ROBINHOOD-P2P/assets/
  */
 (function() {
     'use strict';
@@ -45,7 +42,6 @@
     let channels = {};
     let handshakeSecret = null;
     let pollIntervals = {};
-    let reconnectTimers = {};
     
     const MY_ID = crypto.randomUUID ? crypto.randomUUID() : 
         Math.random().toString(36).substring(2) + Date.now().toString(36);
@@ -85,7 +81,7 @@
         
         for (let attempt = 0; attempt <= retries; attempt++) {
             const ctrl = new AbortController();
-            const timeout = setTimeout(() => ctrl.abort(), 15000); // 15 секунд таймаут
+            const timeout = setTimeout(() => ctrl.abort(), 15000);
             
             try {
                 const options = {
@@ -131,7 +127,7 @@
         }
     }
 
-    // ==================== ШИФРОВАНИЕ (XOR - для обратной совместимости) ====================
+    // ==================== ШИФРОВАНИЕ ====================
     function encryptLegacy(text, key) {
         const enc = new TextEncoder().encode(text);
         const keyBytes = new TextEncoder().encode(key);
@@ -170,7 +166,7 @@
                 if (!res) {
                     consecutiveErrors++;
                     if (consecutiveErrors > 5) {
-                        setStatus('⚠ Проблемы с сетью...', 'warning');
+                        setStatus('Проблемы с сетью...', 'warning');
                         consecutiveErrors = 0;
                     }
                     return;
@@ -185,7 +181,6 @@
                         
                         let text = m.packet;
                         
-                        // Пробуем расшифровать (для старых клиентов)
                         try {
                             const decrypted = decryptLegacy(m.packet, ch.sessionSecret);
                             if (decrypted) {
@@ -215,7 +210,6 @@
             }
         };
         
-        // Первый запуск сразу, затем интервал
         poll();
         pollIntervals[sid] = setInterval(poll, 6000);
     }
@@ -247,9 +241,7 @@
                 handshake: handshakeSecret 
             });
             
-            // Восстанавливаем сохраненные сессии
             await restoreSessions();
-            
             return true;
         } else {
             setStatus('Сервер не отвечает. Повтор через 5 сек...', 'error');
@@ -269,10 +261,7 @@
         }
         
         if (channelCount >= MAX_CHANNELS) {
-            sendToParent({ 
-                type: 'error', 
-                text: `Максимум ${MAX_CHANNELS} чатов. Удалите старые.` 
-            });
+            sendToParent({ type: 'error', text: `Максимум ${MAX_CHANNELS} чатов.` });
             return;
         }
         
@@ -282,7 +271,7 @@
         const beaconRes = await apiCall('POST', '/beacon', { tempKey });
         
         if (!beaconRes || !beaconRes.sessionId) {
-            sendToParent({ type: 'error', text: 'Сервер не отвечает. Попробуйте позже.' });
+            sendToParent({ type: 'error', text: 'Сервер не отвечает.' });
             setStatus('Ошибка создания', 'error');
             return;
         }
@@ -298,11 +287,9 @@
             createdAt: Date.now()
         };
         
-        // Сохраняем сессию
         saveSessions();
         
-        // Формируем ссылку (ключ передается отдельно через безопасный канал)
-        const link = window.location.origin + window.location.pathname.replace('P2PPong/index.html', '') + '?id=' + sid;
+        const link = window.location.origin + window.location.pathname.replace('P2PPong/index.html', '') + 'ROBINHOOD-P2P/?id=' + sid;
         
         sendToParent({
             type: 'session-created',
@@ -313,10 +300,9 @@
         
         setStatus('Ожидание получателя... (90 сек)');
         
-        // Ожидание подключения
         let matched = false;
         const startTime = Date.now();
-        const timeout = 90000; // 90 секунд
+        const timeout = 90000;
         
         while (Date.now() - startTime < timeout) {
             const check = await apiCall('GET', `/beacon?id=${sid}`);
@@ -332,7 +318,7 @@
         if (!matched) {
             delete channels[sid];
             saveSessions();
-            sendToParent({ type: 'error', text: 'Таймаут ожидания. Никто не подключился.' });
+            sendToParent({ type: 'error', text: 'Таймаут ожидания.' });
             setStatus('Таймаут', 'warning');
             return;
         }
@@ -348,8 +334,7 @@
             role: 'creator'
         });
         
-        const newCount = Object.keys(channels).length;
-        setStatus(`Комната открыта (${newCount}/${MAX_CHANNELS})`, 'success');
+        setStatus(`Комната открыта (${Object.keys(channels).length}/${MAX_CHANNELS})`, 'success');
     }
 
     // ==================== ПРИНЯТИЕ СЕССИИ ====================
@@ -363,14 +348,10 @@
         }
         
         if (channelCount >= MAX_CHANNELS) {
-            sendToParent({ 
-                type: 'error', 
-                text: `Максимум ${MAX_CHANNELS} чатов.` 
-            });
+            sendToParent({ type: 'error', text: `Максимум ${MAX_CHANNELS} чатов.` });
             return;
         }
         
-        // Проверяем, не подключены ли уже к этому каналу
         if (channels[sid]) {
             sendToParent({ type: 'error', text: 'Вы уже подключены к этому каналу.' });
             return;
@@ -407,8 +388,7 @@
             role: 'receiver'
         });
         
-        const newCount = Object.keys(channels).length;
-        setStatus(`Комната открыта (${newCount}/${MAX_CHANNELS})`, 'success');
+        setStatus(`Комната открыта (${Object.keys(channels).length}/${MAX_CHANNELS})`, 'success');
     }
 
     // ==================== СОХРАНЕНИЕ/ВОССТАНОВЛЕНИЕ СЕССИЙ ====================
@@ -437,10 +417,9 @@
             const sessions = JSON.parse(saved);
             const restored = [];
             const now = Date.now();
-            const maxAge = 7 * 24 * 60 * 60 * 1000; // 7 дней
+            const maxAge = 7 * 24 * 60 * 60 * 1000;
             
             for (const sc of sessions) {
-                // Пропускаем слишком старые сессии
                 if (now - sc.createdAt > maxAge) continue;
                 
                 const check = await apiCall('GET', `/beacon?id=${sc.id}`);
@@ -479,7 +458,6 @@
         const data = event.data;
         if (!data || !data.action) return;
         
-        // Проверка handshake
         if (data.action === 'handshake') {
             if (data.handshake === handshakeSecret) {
                 handshakeSecret = null;
@@ -488,7 +466,6 @@
             return;
         }
         
-        // Отправка сообщения
         if (data.action === 'send') {
             const ch = channels[data.channelId];
             if (!ch || !ch.sessionSecret) {
@@ -501,7 +478,6 @@
                 return;
             }
             
-            // Отправляем на сервер
             const packet = encryptLegacy(
                 JSON.stringify({
                     text: data.text,
@@ -521,14 +497,12 @@
             return;
         }
         
-        // Смена сервера
         if (data.server) {
             currentServer = data.server;
             setStatus(`Сервер: ${currentServer === 'workers' ? 'Workers' : 'Render'}`);
             return;
         }
         
-        // Действия
         switch (data.action) {
             case 'create':
                 createSession();
@@ -543,12 +517,8 @@
                 break;
                 
             case 'cancel-create':
-                // Отмена ожидания (если поддерживается сервером)
                 setStatus('Готов', 'success');
                 break;
-                
-            default:
-                console.warn('[P2PPong] Unknown action:', data.action);
         }
     });
 
@@ -562,10 +532,8 @@
         saveSessions();
     });
 
-    // Обработка видимости страницы (опрос только когда активно)
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
-            // Страница скрыта - останавливаем опрос для экономии
             Object.keys(pollIntervals).forEach(sid => {
                 if (pollIntervals[sid]) {
                     clearInterval(pollIntervals[sid]);
@@ -573,7 +541,6 @@
                 }
             });
         } else {
-            // Страница снова видна - возобновляем опрос
             Object.keys(channels).forEach(sid => {
                 if (channels[sid].status === 'open' && !pollIntervals[sid]) {
                     startPolling(sid);
