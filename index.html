@@ -8,33 +8,20 @@
     <meta http-equiv="Expires" content="0">
     <title>P2PPong v3.2-sec</title>
     <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
+    <!-- CSP С 'unsafe-inline' для совместимости -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
     <style>
         :root { --bg-primary: #1a2a1f; --bg-secondary: #0d1a0c; --accent: #c4a24b; --accent-light: #e8d5a3; --text: #e8e2c7; --text-dim: #b8a87a; --border: #c4a24b; --btn-bg: rgba(196,162,75,0.15); --robin-bg: rgba(50,70,40,0.9); --robin-accent: #e8c97a; }
         * { margin:0; padding:0; box-sizing:border-box; }
         html,body { height:100%; font-family:'Segoe UI','Inter','Georgia',serif; overflow:hidden; }
-        body {
-            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-            color: var(--text);
-            display:flex; flex-direction:column; align-items:center; justify-content:center;
-            height:100dvh; position:relative;
-        }
-        body::before {
-            content:""; position:fixed; top:0; left:0; width:100%; height:100%;
-            background-image:url('https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/background.webp');
-            background-size:cover; background-position:center; background-repeat:no-repeat;
-            z-index:0; opacity:0.3;
-        }
-        body::after {
-            content:""; position:fixed; top:0; left:0; width:100%; height:100%;
-            background:radial-gradient(circle at 50% 50%, rgba(30,40,25,0.6), rgba(10,20,8,0.9));
-            z-index:0;
-        }
+        body { background:linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%); color:var(--text); display:flex; flex-direction:column; align-items:center; justify-content:center; height:100dvh; position:relative; }
+        body::before { content:""; position:fixed; top:0; left:0; width:100%; height:100%; background-image:url('https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/background.webp'); background-size:cover; background-position:center; background-repeat:no-repeat; z-index:0; opacity:0.3; }
+        body::after { content:""; position:fixed; top:0; left:0; width:100%; height:100%; background:radial-gradient(circle at 50% 50%, rgba(30,40,25,0.6), rgba(10,20,8,0.9)); z-index:0; }
         .container { position:relative; z-index:1; width:100%; max-width:420px; padding:20px; }
         .header-title { text-align:center; font-size:1.3em; font-weight:bold; background:linear-gradient(135deg, var(--accent-light), var(--accent)); -webkit-background-clip:text; background-clip:text; color:transparent; margin-bottom:15px; }
         .robin-row { background:var(--robin-bg); border-left:3px solid var(--robin-accent); border-radius:12px; padding:10px 14px; display:flex; align-items:center; gap:10px; margin-bottom:15px; }
         .robin-avatar { width:40px; height:40px; border-radius:50%; border:2px solid var(--robin-accent); }
-        .robin-text { font-weight:700; font-size:0.8em; color: var(--text); }
+        .robin-text { font-weight:700; font-size:0.8em; color:var(--text); }
         .status-block { background:rgba(20,30,18,0.9); border:1px solid var(--border); border-radius:12px; padding:12px; margin-bottom:12px; text-align:center; }
         .status-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
         .status-dot.online { background:#4caf50; box-shadow:0 0 6px #4caf50; }
@@ -69,16 +56,16 @@
         <div style="font-size:0.6em;color:var(--text-dim);" id="status-sub">Каналов: 0/2</div>
     </div>
     <div class="servers-row">
-        <div class="server-card active" id="server-render" onclick="switchServer('render')">
+        <div class="server-card active" id="server-render">
             <div class="server-name">🌐 Render</div>
             <div class="server-status" id="render-status">Проверка...</div>
         </div>
-        <div class="server-card" id="server-workers" onclick="switchServer('workers')">
+        <div class="server-card" id="server-workers">
             <div class="server-name">⚡ Workers</div>
             <div class="server-status" id="workers-status">Проверка...</div>
         </div>
     </div>
-    <button class="btn btn-secondary" onclick="manualCheckServers()">🔄 Проверить серверы</button>
+    <button class="btn btn-secondary" id="btn-check-servers">🔄 Проверить серверы</button>
     <div class="info-row">
         <span>ID: <span id="my-id-display">-</span></span>
         <span id="pwa-badge">Браузер</span>
@@ -89,7 +76,6 @@
 
 <script>
 (function(){'use strict';
-// ==================== КОНФИГУРАЦИЯ ====================
 const RENDER_SERVER='https://p2ppong.onrender.com';
 const WORKERS_URL='https://robincall.stephanclaps-491.workers.dev';
 let currentServer='render',channels={},handshakeSecret=null,pollIntervals={},serverStatuses={render:'checking',workers:'checking'};
@@ -97,28 +83,24 @@ const MY_ID=crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).sub
 const isPWA=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone||false;
 const MAX_CH=isPWA?20:2;
 
-// ==================== DOM ====================
 const $=s=>document.getElementById(s);
 const robinMessage=$('robin-message'),statusMain=$('status-main'),statusSub=$('status-sub'),statusDot=$('status-dot');
 const renderStatus=$('render-status'),workersStatus=$('workers-status'),serverRender=$('server-render'),serverWorkers=$('server-workers');
 const myIdDisplay=$('my-id-display'),pwaBadge=$('pwa-badge'),channelCount=$('channel-count'),logArea=$('log-area');
+const btnCheckServers=$('btn-check-servers');
 
-// ==================== УТИЛИТЫ ====================
 function getMax(){return isPWA?20:2}
 function log(m,t){console.log('[P2PPong]',m);if(logArea){const time=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});logArea.textContent=`[${time}] ${t==='error'?'❌':t==='success'?'✅':'ℹ️'} ${m}\n`+logArea.textContent;const lines=logArea.textContent.split('\n').slice(0,20);logArea.textContent=lines.join('\n')}}
 function setMsg(m){if(robinMessage)robinMessage.textContent=m}
 function updateUI(){const c=Object.keys(channels).length,m=getMax();if(channelCount)channelCount.textContent=c+'/'+m;if(pwaBadge)pwaBadge.textContent=isPWA?'PWA (20)':'Браузер (2)';if(statusSub)statusSub.textContent='Каналов: '+c+'/'+m+' | Сервер: '+(currentServer==='workers'?'Workers':'Render')}
 function updateServerUI(){
     serverRender.classList.toggle('active',currentServer==='render');serverWorkers.classList.toggle('active',currentServer==='workers');
-    const rDot=serverStatuses.render==='online'?'🟢':serverStatuses.render==='checking'?'🟡':'🔴';
-    const wDot=serverStatuses.workers==='online'?'🟢':serverStatuses.workers==='checking'?'🟡':'🔴';
-    if(renderStatus)renderStatus.textContent=rDot+' '+(serverStatuses.render==='online'?'Онлайн':serverStatuses.render==='checking'?'Проверка':'Офлайн');
-    if(workersStatus)workersStatus.textContent=wDot+' '+(serverStatuses.workers==='online'?'Онлайн':serverStatuses.workers==='checking'?'Проверка':'Офлайн');
+    if(renderStatus)renderStatus.textContent=(serverStatuses.render==='online'?'🟢 ':'🔴 ')+(serverStatuses.render==='online'?'Онлайн':'Офлайн');
+    if(workersStatus)workersStatus.textContent=(serverStatuses.workers==='online'?'🟢 ':'🔴 ')+(serverStatuses.workers==='online'?'Онлайн':'Офлайн');
     const cs=serverStatuses[currentServer];statusDot.className='status-dot '+(cs==='online'?'online':cs==='checking'?'checking':'offline');
     if(statusMain)statusMain.textContent=cs==='online'?'✅ Сервер готов':cs==='checking'?'🟡 Проверка...':'❌ Сервер офлайн';
 }
 
-// ==================== API (с защитой таймаутов) ====================
 async function apiCall(method,path,body=null,retries=1){
     const url=currentServer==='workers'?WORKERS_URL:RENDER_SERVER;
     for(let a=0;a<=retries;a++){
@@ -133,39 +115,31 @@ async function apiCall(method,path,body=null,retries=1){
     }return null;
 }
 
-// ==================== ПРОВЕРКА СЕРВЕРОВ ====================
 async function checkServer(server){
     const prev=currentServer;if(server)currentServer=server;
-    const name=currentServer==='workers'?'Workers':'Render';log('Проверка '+name+'...');
     const ping=await apiCall('GET','/ping');
-    if(ping){serverStatuses[currentServer]='online';log(name+' онлайн','success');if(!handshakeSecret||server!==prev){handshakeSecret=generateToken();sendToParent({type:'pong-ready',handshake:handshakeSecret})}}
-    else{serverStatuses[currentServer]='offline';log(name+' не отвечает','error')}
+    if(ping){serverStatuses[currentServer]='online';if(!handshakeSecret||server!==prev){handshakeSecret=generateToken();sendToParent({type:'pong-ready',handshake:handshakeSecret})}}
+    else{serverStatuses[currentServer]='offline'}
     if(server)currentServer=prev;updateServerUI();return ping!==null;
 }
 async function checkAllServers(){
-    log('Полная проверка...');setMsg('🔍 Проверяю серверы...');
     await Promise.all([checkServer('render'),checkServer('workers')]);
     if(serverStatuses[currentServer]==='offline'){const other=currentServer==='render'?'workers':'render';if(serverStatuses[other]==='online')switchServer(other)}
     updateServerUI();setMsg(serverStatuses[currentServer]==='online'?'✅ Сервер готов!':'⚠ Все серверы офлайн');
 }
 function switchServer(server){
     if(server===currentServer)return;
-    log('Переключение на '+(server==='workers'?'Workers':'Render'));currentServer=server;
-    try{localStorage.setItem('robinhood_server',currentServer)}catch(e){}
+    currentServer=server;try{localStorage.setItem('robinhood_server',currentServer)}catch(e){}
     stopAllPolling();handshakeSecret=null;sendToParent({server:currentServer});
     checkServer().then(()=>{if(serverStatuses[currentServer]==='online')restoreSessions()});
     updateServerUI();updateUI();
 }
-function manualCheckServers(){checkAllServers()}
 
-// ==================== ГЕНЕРАЦИЯ ====================
 function generateToken(){return crypto.randomUUID?crypto.randomUUID():Math.random().toString(36).substring(2)+Math.random().toString(36).substring(2)}
 async function sha256(text){const data=new TextEncoder().encode(text);const hash=await crypto.subtle.digest('SHA-256',data);return Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('')}
 
-// ==================== ОТПРАВКА ====================
 function sendToParent(msg){if(window.parent&&window.parent!==window)try{window.parent.postMessage(msg,'*')}catch(e){}}
 
-// ==================== ПОЛЛИНГ ====================
 function startPolling(sid){
     if(pollIntervals[sid])return;
     let lastTime=Date.now(),pollCount=0;
@@ -184,70 +158,62 @@ function startPolling(sid){
 function stopPolling(sid){if(pollIntervals[sid]){clearInterval(pollIntervals[sid]);delete pollIntervals[sid]}}
 function stopAllPolling(){Object.keys(pollIntervals).forEach(stopPolling)}
 
-// ==================== ШИФРОВАНИЕ (XOR для транспорта) ====================
 function encryptLegacy(text,key){const enc=new TextEncoder().encode(text),keyBytes=new TextEncoder().encode(key),out=new Uint8Array(enc.length);for(let i=0;i<enc.length;i++)out[i]=enc[i]^keyBytes[i%keyBytes.length];return btoa(String.fromCharCode(...out))}
 function decryptLegacy(text,key){try{const enc=Uint8Array.from(atob(text),c=>c.charCodeAt(0)),keyBytes=new TextEncoder().encode(key),out=new Uint8Array(enc.length);for(let i=0;i<enc.length;i++)out[i]=enc[i]^keyBytes[i%keyBytes.length];return new TextDecoder().decode(out)}catch(e){return null}}
 
-// ==================== СЕССИИ ====================
 async function createSession(){
     const count=Object.keys(channels).length,max=getMax();
     if(count>=max){sendToParent({type:'error',text:isPWA?'Максимум '+max+' каналов.':'Максимум '+max+' каналов. Установите PWA для 20.'});if(!isPWA)sendToParent({type:'install-prompt'});return}
-    log('Создание маяка...');setMsg('⚒ Куём стрелу...');
     const tempKey=generateToken(),beaconRes=await apiCall('POST','/beacon',{tempKey});
     if(!beaconRes||!beaconRes.sessionId){sendToParent({type:'error',text:'Сервер не отвечает'});return}
     const sid=beaconRes.sessionId,sessionSecret=await sha256(tempKey);
     channels[sid]={tempKey,sessionSecret,status:'waiting',isCreator:true,createdAt:Date.now()};
     const link='https://stepweather-prog.github.io/ROBINHOOD-P2P/?id='+sid+'&key='+tempKey;
     sendToParent({type:'session-created',sessionId:sid,key:tempKey,fullLink:link});
-    log('Маяк: '+sid.substring(0,8)+'...','success');setMsg('⏳ Ожидание... (90 сек)');updateUI();
+    updateUI();
     let matched=false;const start=Date.now();
     while(Date.now()-start<90000){const check=await apiCall('GET','/beacon?id='+sid);if(check&&check.matched){matched=true;break}await new Promise(r=>setTimeout(r,5000))}
-    if(!matched){delete channels[sid];saveSessions();sendToParent({type:'error',text:'Таймаут ожидания'});setMsg('⏰ Никто не подключился');updateUI();return}
+    if(!matched){delete channels[sid];saveSessions();sendToParent({type:'error',text:'Таймаут ожидания'});updateUI();return}
     channels[sid].status='open';startPolling(sid);saveSessions();
     sendToParent({type:'channel-open',secret:sessionSecret,channelId:sid,role:'creator'});
-    log('Канал открыт!','success');setMsg('✅ Колчан открыт!');updateUI();
+    updateUI();
 }
 async function acceptSession(sid,tempKey){
-    const count=Object.keys(channels).length;
-    if(count>=getMax()){sendToParent({type:'error',text:'Максимум каналов'});if(!isPWA)sendToParent({type:'install-prompt'});return}
+    if(Object.keys(channels).length>=getMax()){sendToParent({type:'error',text:'Максимум каналов'});if(!isPWA)sendToParent({type:'install-prompt'});return}
     if(channels[sid]){sendToParent({type:'error',text:'Уже в канале'});return}
-    log('Поиск маяка...');setMsg('🔍 Ищу маяк...');
     const findRes=await apiCall('POST','/find',{tempKey});
-    if(!findRes||findRes.status!=='matched'){sendToParent({type:'error',text:'Маяк не найден'});setMsg('⚠ Маяк не найден');return}
+    if(!findRes||findRes.status!=='matched'){sendToParent({type:'error',text:'Маяк не найден'});return}
     const actualSid=findRes.sessionId||sid,sessionSecret=await sha256(tempKey);
     channels[actualSid]={tempKey,sessionSecret,status:'open',isCreator:false,createdAt:Date.now()};
     startPolling(actualSid);saveSessions();
     sendToParent({type:'channel-open',secret:sessionSecret,channelId:actualSid,role:'receiver'});
-    log('Подключено!','success');setMsg('✅ Подключено!');updateUI();
+    updateUI();
 }
 
-// ==================== СОХРАНЕНИЕ ====================
 function saveSessions(){try{const s=Object.entries(channels).filter(([_,c])=>c.status==='open').map(([id,c])=>({id,key:c.tempKey,secret:c.sessionSecret,creator:c.isCreator,createdAt:c.createdAt}));localStorage.setItem('robinhood_pong_sessions',JSON.stringify(s))}catch(e){}}
-async function restoreSessions(){try{const saved=localStorage.getItem('robinhood_pong_sessions');if(!saved)return;const sessions=JSON.parse(saved),restored=[],now=Date.now();for(const sc of sessions){if(now-sc.createdAt>7*24*60*60*1000)continue;const check=await apiCall('GET','/beacon?id='+sc.id);if(check&&check.matched){channels[sc.id]={tempKey:sc.key,sessionSecret:sc.secret,status:'open',isCreator:sc.creator,createdAt:sc.createdAt};startPolling(sc.id);restored.push({channelId:sc.id,secret:sc.secret,role:sc.creator?'creator':'receiver'})}}if(restored.length>0){sendToParent({type:'restored-channels',channels:restored});log('Восстановлено: '+restored.length,'success')}updateUI()}catch(e){}}
+async function restoreSessions(){try{const saved=localStorage.getItem('robinhood_pong_sessions');if(!saved)return;const sessions=JSON.parse(saved),restored=[],now=Date.now();for(const sc of sessions){if(now-sc.createdAt>7*24*60*60*1000)continue;const check=await apiCall('GET','/beacon?id='+sc.id);if(check&&check.matched){channels[sc.id]={tempKey:sc.key,sessionSecret:sc.secret,status:'open',isCreator:sc.creator,createdAt:sc.createdAt};startPolling(sc.id);restored.push({channelId:sc.id,secret:sc.secret,role:sc.creator?'creator':'receiver'})}}if(restored.length>0)sendToParent({type:'restored-channels',channels:restored});updateUI()}catch(e){}}
 
-// ==================== ОБРАБОТЧИК ====================
+// Все обработчики через addEventListener
+serverRender.addEventListener('click',()=>switchServer('render'));
+serverWorkers.addEventListener('click',()=>switchServer('workers'));
+btnCheckServers.addEventListener('click',checkAllServers);
+
 window.addEventListener('message',(event)=>{
     const data=event.data;if(!data||!data.action)return;
-    if(data.action==='handshake'){if(data.handshake===handshakeSecret){handshakeSecret=null;sendToParent({type:'handshake-ok'});log('Handshake OK','success')}return}
+    if(data.action==='handshake'){if(data.handshake===handshakeSecret){handshakeSecret=null;sendToParent({type:'handshake-ok'})}return}
     if(data.action==='send'){const ch=channels[data.channelId];if(!ch||!ch.sessionSecret){sendToParent({type:'error',text:'Канал не найден'});return}if(data.secret!==ch.sessionSecret){sendToParent({type:'error',text:'Неверный секрет'});return}const packet=encryptLegacy(JSON.stringify({text:data.text,sender:MY_ID,time:Date.now()}),ch.sessionSecret);apiCall('POST','/message',{sessionId:data.channelId,packet});return}
     if(data.server&&data.server!==currentServer){switchServer(data.server);return}
-    switch(data.action){case'create':createSession();break;case'accept':if(data.id&&data.key)acceptSession(data.id,data.key);break;case'cancel-create':setMsg('🏹 Готов');break}
+    switch(data.action){case'create':createSession();break;case'accept':if(data.id&&data.key)acceptSession(data.id,data.key);break}
 });
 
-// ==================== ЖИЗНЕННЫЙ ЦИКЛ ====================
 window.addEventListener('beforeunload',()=>{saveSessions();stopAllPolling()});
 document.addEventListener('visibilitychange',()=>{if(document.hidden){Object.keys(pollIntervals).forEach(stopPolling)}else{Object.keys(channels).forEach(sid=>{if(channels[sid].status==='open')startPolling(sid)});checkAllServers()}});
 
-// ==================== ИНИЦИАЛИЗАЦИЯ ====================
 async function init(){
-    log('P2PPong v3.2-sec загружен');
-    if(myIdDisplay)myIdDisplay.textContent=MY_ID.substring(0,8)+'...';
     const saved=localStorage.getItem('robinhood_server');if(saved&&(saved==='render'||saved==='workers'))currentServer=saved;
-    updateServerUI();updateUI();
-    await checkAllServers();
-    setMsg('✅ Сервер готов!');
+    updateServerUI();updateUI();if(myIdDisplay)myIdDisplay.textContent=MY_ID.substring(0,8)+'...';
+    await checkAllServers();setMsg('✅ Сервер готов!');
 }
-window.switchServer=switchServer;window.manualCheckServers=manualCheckServers;
 init();
 })();
 </script>
