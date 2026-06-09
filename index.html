@@ -8,7 +8,6 @@
     <meta http-equiv="Expires" content="0">
     <title>P2PPong v3.2-sec</title>
     <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
-    <!-- CSP С 'unsafe-inline' для совместимости -->
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
     <style>
         :root { --bg-primary: #1a2a1f; --bg-secondary: #0d1a0c; --accent: #c4a24b; --accent-light: #e8d5a3; --text: #e8e2c7; --text-dim: #b8a87a; --border: #c4a24b; --btn-bg: rgba(196,162,75,0.15); --robin-bg: rgba(50,70,40,0.9); --robin-accent: #e8c97a; }
@@ -129,7 +128,8 @@ async function checkAllServers(){
 }
 function switchServer(server){
     if(server===currentServer)return;
-    currentServer=server;try{localStorage.setItem('robinhood_server',currentServer)}catch(e){}
+    log('Переключение на '+(server==='workers'?'Workers':'Render'));currentServer=server;
+    try{localStorage.setItem('robinhood_server',currentServer)}catch(e){}
     stopAllPolling();handshakeSecret=null;sendToParent({server:currentServer});
     checkServer().then(()=>{if(serverStatuses[currentServer]==='online')restoreSessions()});
     updateServerUI();updateUI();
@@ -161,49 +161,57 @@ function stopAllPolling(){Object.keys(pollIntervals).forEach(stopPolling)}
 function encryptLegacy(text,key){const enc=new TextEncoder().encode(text),keyBytes=new TextEncoder().encode(key),out=new Uint8Array(enc.length);for(let i=0;i<enc.length;i++)out[i]=enc[i]^keyBytes[i%keyBytes.length];return btoa(String.fromCharCode(...out))}
 function decryptLegacy(text,key){try{const enc=Uint8Array.from(atob(text),c=>c.charCodeAt(0)),keyBytes=new TextEncoder().encode(key),out=new Uint8Array(enc.length);for(let i=0;i<enc.length;i++)out[i]=enc[i]^keyBytes[i%keyBytes.length];return new TextDecoder().decode(out)}catch(e){return null}}
 
+// ==================== КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: сервер в ссылке ====================
 async function createSession(){
     const count=Object.keys(channels).length,max=getMax();
     if(count>=max){sendToParent({type:'error',text:isPWA?'Максимум '+max+' каналов.':'Максимум '+max+' каналов. Установите PWA для 20.'});if(!isPWA)sendToParent({type:'install-prompt'});return}
     const tempKey=generateToken(),beaconRes=await apiCall('POST','/beacon',{tempKey});
-    if(!beaconRes||!beaconRes.sessionId){sendToParent({type:'error',text:'Сервер не отвечает'});return}
+    if(!beaconRes||!beaconRes.sessionId){sendToParent({type:'error',text:'Сервер не отвечает. Попробуйте переключить сервер.'});return}
     const sid=beaconRes.sessionId,sessionSecret=await sha256(tempKey);
     channels[sid]={tempKey,sessionSecret,status:'waiting',isCreator:true,createdAt:Date.now()};
-    const link='https://stepweather-prog.github.io/ROBINHOOD-P2P/?id='+sid+'&key='+tempKey;
+    // ВАЖНО: добавляем &server= в ссылку
+    const link='https://stepweather-prog.github.io/ROBINHOOD-P2P/?id='+sid+'&key='+tempKey+'&server='+currentServer;
     sendToParent({type:'session-created',sessionId:sid,key:tempKey,fullLink:link});
+    log('Маяк создан: '+sid.substring(0,8)+'... [сервер: '+currentServer+']','success');
     updateUI();
     let matched=false;const start=Date.now();
     while(Date.now()-start<90000){const check=await apiCall('GET','/beacon?id='+sid);if(check&&check.matched){matched=true;break}await new Promise(r=>setTimeout(r,5000))}
-    if(!matched){delete channels[sid];saveSessions();sendToParent({type:'error',text:'Таймаут ожидания'});updateUI();return}
+    if(!matched){delete channels[sid];saveSessions();sendToParent({type:'error',text:'Таймаут ожидания. Никто не подключился.'});updateUI();return}
     channels[sid].status='open';startPolling(sid);saveSessions();
     sendToParent({type:'channel-open',secret:sessionSecret,channelId:sid,role:'creator'});
-    updateUI();
+    log('Канал открыт!','success');setMsg('✅ Колчан открыт!');updateUI();
 }
+// ==================== КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: acceptSession с любым key ====================
 async function acceptSession(sid,tempKey){
-    if(Object.keys(channels).length>=getMax()){sendToParent({type:'error',text:'Максимум каналов'});if(!isPWA)sendToParent({type:'install-prompt'});return}
-    if(channels[sid]){sendToParent({type:'error',text:'Уже в канале'});return}
-    const findRes=await apiCall('POST','/find',{tempKey});
-    if(!findRes||findRes.status!=='matched'){sendToParent({type:'error',text:'Маяк не найден'});return}
-    const actualSid=findRes.sessionId||sid,sessionSecret=await sha256(tempKey);
-    channels[actualSid]={tempKey,sessionSecret,status:'open',isCreator:false,createdAt:Date.now()};
+    const count=Object.keys(channels).length;
+    if(count>=getMax()){sendToParent({type:'error',text:'Максимум каналов.'});if(!isPWA)sendToParent({type:'install-prompt'});return}
+    if(channels[sid]){sendToParent({type:'error',text:'Вы уже в этом канале.'});return}
+    log('Поиск маяка: '+sid.substring(0,8)+'...');
+    // Используем переданный key или генерируем новый если нет
+    const findKey=tempKey||generateToken();
+    const findRes=await apiCall('POST','/find',{tempKey:findKey});
+    if(!findRes||findRes.status!=='matched'){sendToParent({type:'error',text:'Маяк не найден. Проверьте сервер.'});return}
+    const actualSid=findRes.sessionId||sid,sessionSecret=await sha256(findKey);
+    channels[actualSid]={tempKey:findKey,sessionSecret,status:'open',isCreator:false,createdAt:Date.now()};
     startPolling(actualSid);saveSessions();
     sendToParent({type:'channel-open',secret:sessionSecret,channelId:actualSid,role:'receiver'});
-    updateUI();
+    log('Подключено к каналу!','success');setMsg('✅ Подключено!');updateUI();
 }
 
 function saveSessions(){try{const s=Object.entries(channels).filter(([_,c])=>c.status==='open').map(([id,c])=>({id,key:c.tempKey,secret:c.sessionSecret,creator:c.isCreator,createdAt:c.createdAt}));localStorage.setItem('robinhood_pong_sessions',JSON.stringify(s))}catch(e){}}
 async function restoreSessions(){try{const saved=localStorage.getItem('robinhood_pong_sessions');if(!saved)return;const sessions=JSON.parse(saved),restored=[],now=Date.now();for(const sc of sessions){if(now-sc.createdAt>7*24*60*60*1000)continue;const check=await apiCall('GET','/beacon?id='+sc.id);if(check&&check.matched){channels[sc.id]={tempKey:sc.key,sessionSecret:sc.secret,status:'open',isCreator:sc.creator,createdAt:sc.createdAt};startPolling(sc.id);restored.push({channelId:sc.id,secret:sc.secret,role:sc.creator?'creator':'receiver'})}}if(restored.length>0)sendToParent({type:'restored-channels',channels:restored});updateUI()}catch(e){}}
 
-// Все обработчики через addEventListener
+// Обработчики
 serverRender.addEventListener('click',()=>switchServer('render'));
 serverWorkers.addEventListener('click',()=>switchServer('workers'));
 btnCheckServers.addEventListener('click',checkAllServers);
 
 window.addEventListener('message',(event)=>{
     const data=event.data;if(!data||!data.action)return;
-    if(data.action==='handshake'){if(data.handshake===handshakeSecret){handshakeSecret=null;sendToParent({type:'handshake-ok'})}return}
+    if(data.action==='handshake'){if(data.handshake===handshakeSecret){handshakeSecret=null;sendToParent({type:'handshake-ok'});log('Handshake OK','success')}return}
     if(data.action==='send'){const ch=channels[data.channelId];if(!ch||!ch.sessionSecret){sendToParent({type:'error',text:'Канал не найден'});return}if(data.secret!==ch.sessionSecret){sendToParent({type:'error',text:'Неверный секрет'});return}const packet=encryptLegacy(JSON.stringify({text:data.text,sender:MY_ID,time:Date.now()}),ch.sessionSecret);apiCall('POST','/message',{sessionId:data.channelId,packet});return}
     if(data.server&&data.server!==currentServer){switchServer(data.server);return}
-    switch(data.action){case'create':createSession();break;case'accept':if(data.id&&data.key)acceptSession(data.id,data.key);break}
+    switch(data.action){case'create':createSession();break;case'accept':if(data.id)acceptSession(data.id,data.key||'');break;case'cancel-create':setMsg('🏹 Готов');break}
 });
 
 window.addEventListener('beforeunload',()=>{saveSessions();stopAllPolling()});
