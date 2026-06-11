@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P2PPong v4.2</title>
+    <title>P2PPong v4.0</title>
     <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
     <style>
@@ -37,7 +37,7 @@
 </head>
 <body>
 <div class="container">
-    <h2>🏹 P2PPong v4.2</h2>
+    <h2>🏹 P2PPong v4.0</h2>
     <div class="status-row">
         <span class="status-dot checking" id="status-dot"></span>
         <span id="status-text">Проверка...</span>
@@ -76,7 +76,6 @@
     let pollIntervals = {};
     let serverStatuses = { render: 'checking', workers: 'checking' };
     
-    // Определяем тип приложения по referrer (как в v3.3)
     const parentOrigin = document.referrer || '';
     const isRobinHood = parentOrigin.includes('ROBINHOOD-P2P') && !parentOrigin.includes('ROBINHOOD-P2PCall');
     const isRobinCall = parentOrigin.includes('ROBINHOOD-P2PCall');
@@ -89,6 +88,7 @@
     const MAX_CH = isPWA ? 20 : 2;
 
     function $(id) { return document.getElementById(id); }
+    
     function log(msg, type = 'info') {
         const entry = document.createElement('div');
         entry.className = 'log-entry ' + type;
@@ -111,6 +111,7 @@
         $('card-workers').classList.toggle('active', currentServer === 'workers');
         $('render-status').textContent = (serverStatuses.render === 'online' ? '🟢 ' : '🔴 ') + (serverStatuses.render === 'online' ? 'Онлайн' : 'Офлайн');
         $('workers-status').textContent = (serverStatuses.workers === 'online' ? '🟢 ' : '🔴 ') + (serverStatuses.workers === 'online' ? 'Онлайн' : 'Офлайн');
+        if ($('peer-count')) $('peer-count').textContent = Object.keys(channels).length;
     }
 
     function sendToParent(msg) {
@@ -150,12 +151,13 @@
         if (ping && !handshakeSecret) {
             handshakeSecret = generateToken();
             sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-            log('Handshake отправлен', 'success');
+            log('Handshake отправлен родителю', 'success');
         }
         return ping !== null;
     }
 
     async function checkAllServers() {
+        log('Проверка серверов...', 'info');
         await Promise.all([
             checkServer('render'),
             checkServer('workers')
@@ -174,9 +176,13 @@
         try { localStorage.setItem('robinhood_server', currentServer); } catch (e) {}
         stopAllPolling();
         handshakeSecret = null;
-        sendToParent({ server: currentServer });
+        sendToParent({ type: 'server-switched', server: currentServer });
         checkServer().then(() => {
-            if (serverStatuses[currentServer] === 'online') restoreSessions();
+            if (serverStatuses[currentServer] === 'online') {
+                handshakeSecret = generateToken();
+                sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
+                restoreSessions();
+            }
         });
         updateUI();
     }
@@ -282,12 +288,14 @@
                     restored.push({ channelId: sc.id, secret: sc.secret, role: sc.creator ? 'creator' : 'receiver' });
                 }
             }
-            if (restored.length > 0) sendToParent({ type: 'restored-channels', channels: restored });
+            if (restored.length > 0) {
+                sendToParent({ type: 'restored-channels', channels: restored });
+            }
             updateUI();
-        } catch (e) {}
+        } catch (e) { log('Ошибка восстановления: ' + e.message, 'error'); }
     }
 
-    // ===== Создание сессии (СОВМЕСТИМО С v3.3) =====
+    // ===== СОЗДАНИЕ СЕССИИ (tempKey от клиента) =====
     async function createSession(clientTempKey) {
         const count = Object.keys(channels).length;
         const max = MAX_CH;
@@ -304,7 +312,7 @@
             return;
         }
         const sid = beaconRes.sessionId;
-        // ВАЖНО: Используем ТОТ ЖЕ алгоритм, что и v3.3
+        // ВАЖНО: sessionSecret = sha256(tempKey) — совместимость с v3.3
         const sessionSecret = await sha256(tempKey);
         channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true, createdAt: Date.now() };
         const link = APP_BASE_URL + '?id=' + sid + '&server=' + currentServer + '#key=' + tempKey;
@@ -353,7 +361,7 @@
             return;
         }
         const actualSid = findRes.sessionId || sid;
-        // ВАЖНО: Используем ТОТ ЖЕ алгоритм
+        // ВАЖНО: sessionSecret = sha256(findKey) — совместимость с v3.3
         const sessionSecret = await sha256(findKey);
         channels[actualSid] = { tempKey: findKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() };
         startPolling(actualSid);
@@ -363,16 +371,17 @@
         updateUI();
     }
 
-    // Обработка сообщений от родителя
+    // ===== ОБРАБОТКА СООБЩЕНИЙ ОТ РОДИТЕЛЯ =====
     window.addEventListener('message', (event) => {
         let origin;
         try { origin = new URL(event.origin).hostname; } catch (e) { return; }
         const allowed = ['stepweather-prog.github.io', 'localhost', '127.0.0.1'];
         if (!allowed.some(a => origin.endsWith(a))) return;
 
+        if (event.source !== window.parent) return;
         const data = event.data;
         if (!data || !data.action) return;
-        
+
         if (data.action === 'handshake') {
             if (data.handshake === handshakeSecret) {
                 handshakeSecret = null;
@@ -395,8 +404,21 @@
             apiCall('POST', '/message', { sessionId: data.channelId, packet });
             return;
         }
-        if (data.server && data.server !== currentServer) {
+        // Обработка server-switch от клиента
+        if (data.action === 'server-switch' && data.server && data.server !== currentServer) {
             switchServer(data.server);
+            return;
+        }
+        // Обработка get-status — отправляем полный статус
+        if (data.action === 'get-status') {
+            sendToParent({
+                type: 'server-status',
+                server: currentServer,
+                status: serverStatuses[currentServer],
+                channels: Object.keys(channels).length,
+                max: MAX_CH,
+                isPWA: isPWA
+            });
             return;
         }
         switch (data.action) {
@@ -431,7 +453,8 @@
         if (saved && (saved === 'render' || saved === 'workers')) currentServer = saved;
         updateUI();
         await checkAllServers();
-        log('P2PPong v4.2 готов [' + (isRobinCall ? 'Call' : 'P2P') + ']', 'success');
+        await restoreSessions();
+        log('P2PPong v4.0 готов [' + (isRobinCall ? 'Call' : 'P2P') + ']', 'success');
     }
 
     init();
