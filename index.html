@@ -3,71 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>P2PPong v4.0</title>
+    <title>P2PPong v4.1</title>
     <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
     <style>
-        :root {
-            --bg: #0d1a0c; --bg2: #1a2a1f; --accent: #c4a24b; --accent2: #e8d5a3;
-            --text: #e8e2c7; --dim: #b8a87a; --border: #c4a24b; --green: #4caf50;
-            --red: #f44336; --orange: #ff9800;
-        }
+        :root { --bg: #0d1a0c; --bg2: #1a2a1f; --accent: #c4a24b; --accent2: #e8d5a3; --text: #e8e2c7; --dim: #b8a87a; --border: #c4a24b; --green: #4caf50; --red: #f44336; --orange: #ff9800; }
         * { margin:0; padding:0; box-sizing:border-box; }
-        body {
-            background:linear-gradient(135deg, var(--bg) 0%, var(--bg2) 100%);
-            color:var(--text); font-family:'Segoe UI','Inter',sans-serif;
-            display:flex; align-items:center; justify-content:center;
-            min-height:100vh; padding:20px;
-        }
-        .container {
-            width:100%; max-width:500px;
-            background:rgba(20,30,18,0.95); border:2px solid var(--border);
-            border-radius:20px; padding:24px; box-shadow:0 8px 32px rgba(0,0,0,0.5);
-        }
+        body { background:linear-gradient(135deg, var(--bg) 0%, var(--bg2) 100%); color:var(--text); font-family:'Segoe UI','Inter',sans-serif; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
+        .container { width:100%; max-width:500px; background:rgba(20,30,18,0.95); border:2px solid var(--border); border-radius:20px; padding:24px; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
         h2 { text-align:center; background:linear-gradient(135deg,var(--accent2),var(--accent)); -webkit-background-clip:text; background-clip:text; color:transparent; margin-bottom:20px; }
-        .status-row { display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:16px; }
+        .status-row { display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:16px; flex-wrap:wrap; }
         .status-dot { width:10px; height:10px; border-radius:50%; }
         .status-dot.online { background:var(--green); box-shadow:0 0 8px var(--green); }
         .status-dot.offline { background:var(--red); }
         .status-dot.checking { background:var(--orange); animation:pulse 1s infinite; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
         .server-cards { display:flex; gap:10px; margin-bottom:16px; }
-        .server-card {
-            flex:1; padding:12px; border-radius:12px; border:1px solid var(--border);
-            text-align:center; cursor:pointer; transition:0.2s;
-            background:rgba(255,255,255,0.03);
-        }
+        .server-card { flex:1; padding:12px; border-radius:12px; border:1px solid var(--border); text-align:center; cursor:pointer; transition:0.2s; background:rgba(255,255,255,0.03); }
         .server-card:hover { background:rgba(196,162,75,0.15); }
         .server-card.active { border-color:var(--green); background:rgba(76,175,80,0.1); }
         .server-name { font-weight:bold; font-size:0.9em; color:var(--accent2); }
         .server-status { font-size:0.65em; color:var(--dim); margin-top:4px; }
-        .log-box {
-            background:rgba(0,0,0,0.4); border-radius:10px; padding:10px;
-            max-height:200px; overflow-y:auto; font-family:monospace;
-            font-size:0.6em; color:var(--dim); margin-top:12px;
-        }
+        .log-box { background:rgba(0,0,0,0.4); border-radius:10px; padding:10px; max-height:200px; overflow-y:auto; font-family:monospace; font-size:0.6em; color:var(--dim); margin-top:12px; }
         .log-entry { margin:3px 0; }
         .log-entry.success { color:var(--green); }
         .log-entry.error { color:var(--red); }
         .log-entry.info { color:var(--accent2); }
-        .stats-row { display:flex; justify-content:space-between; font-size:0.6em; color:var(--dim); margin-top:12px; }
-        button {
-            width:100%; padding:12px; border-radius:10px; border:1px solid var(--border);
-            background:rgba(196,162,75,0.1); color:var(--text); cursor:pointer;
-            font-weight:bold; font-size:0.9em; transition:0.2s; margin-top:8px;
-        }
+        .stats-row { display:flex; justify-content:space-between; font-size:0.6em; color:var(--dim); margin-top:12px; flex-wrap:wrap; gap:4px; }
+        button { width:100%; padding:12px; border-radius:10px; border:1px solid var(--border); background:rgba(196,162,75,0.1); color:var(--text); cursor:pointer; font-weight:bold; font-size:0.9em; transition:0.2s; margin-top:8px; }
         button:hover { background:rgba(196,162,75,0.25); }
-        .badge {
-            display:inline-block; padding:2px 8px; border-radius:10px;
-            font-size:0.7em; font-weight:bold;
-        }
+        .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7em; font-weight:bold; }
         .badge-pwa { background:rgba(76,175,80,0.2); color:var(--green); }
         .badge-browser { background:rgba(255,152,0,0.2); color:var(--orange); }
     </style>
 </head>
 <body>
 <div class="container">
-    <h2>🏹 P2PPong v4.0</h2>
+    <h2>🏹 P2PPong v4.1</h2>
     <div class="status-row">
         <span class="status-dot checking" id="status-dot"></span>
         <span id="status-text">Проверка...</span>
@@ -99,6 +71,7 @@
     const WORKERS = 'https://robincall.stephanclaps-491.workers.dev';
     const PONG_SESSIONS_KEY = 'pong_sessions_v4';
     const PONG_SECURE_KEY = 'pong_secure_v2';
+    const SESSION_VERSION = 4;
     const MAX_CHANNELS_BROWSER = 2;
     const MAX_CHANNELS_PWA = 20;
 
@@ -107,7 +80,13 @@
     let handshakeSecret = null;
     let pollIntervals = {};
     let serverStatuses = { render: 'checking', workers: 'checking' };
-    let parentOrigin = '';
+    
+    // ИСПРАВЛЕНИЕ: Определяем тип приложения по referrer
+    const referrer = document.referrer || '';
+    const isRobinHoodP2P = referrer.includes('ROBINHOOD-P2P') && !referrer.includes('ROBINHOOD-P2PCall');
+    const appBase = isRobinHoodP2P ? 
+        'https://stepweather-prog.github.io/ROBINHOOD-P2P/' : 
+        'https://stepweather-prog.github.io/ROBINHOOD-P2PCall/';
 
     const NODE_ID = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone || false;
@@ -182,11 +161,28 @@
 
     async function checkAllServers() {
         log('Проверка серверов...', 'info');
-        const results = await Promise.allSettled([
-            (async () => { const ok = await checkServer('render'); if (ok) log('Render онлайн', 'success'); else log('Render офлайн', 'error'); })(),
-            (async () => { const ok = await checkServer('workers'); if (ok) log('Workers онлайн', 'success'); else log('Workers офлайн', 'error'); })(),
+        await Promise.allSettled([
+            (async () => { 
+                const prev = currentServer; currentServer = 'render';
+                const ping = await apiCall('GET', '/ping');
+                serverStatuses.render = ping ? 'online' : 'offline';
+                currentServer = prev;
+                log('Render: ' + (ping ? 'онлайн' : 'офлайн'), ping ? 'success' : 'error');
+            })(),
+            (async () => {
+                const prev = currentServer; currentServer = 'workers';
+                const ping = await apiCall('GET', '/ping');
+                serverStatuses.workers = ping ? 'online' : 'offline';
+                currentServer = prev;
+                log('Workers: ' + (ping ? 'онлайн' : 'офлайн'), ping ? 'success' : 'error');
+            })(),
         ]);
         updateUI();
+        // Отправляем handshake если ещё не отправлен
+        if (!handshakeSecret && serverStatuses[currentServer] === 'online') {
+            handshakeSecret = generateToken();
+            sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
+        }
     }
 
     function switchServer(server) {
@@ -196,7 +192,7 @@
         try { localStorage.setItem('robinhood_server', currentServer); } catch (e) {}
         stopAllPolling();
         handshakeSecret = null;
-        sendToParent({ server: currentServer, type: 'server-switched' });
+        sendToParent({ type: 'server-switched', server: currentServer });
         checkServer().then(() => {
             if (serverStatuses[currentServer] === 'online') {
                 handshakeSecret = generateToken();
@@ -265,7 +261,11 @@
         try {
             const sessions = Object.entries(channels)
                 .filter(([, c]) => c.status === 'open')
-                .map(([id, c]) => ({ id, key: c.tempKey, secret: c.sessionSecret, creator: c.isCreator, createdAt: c.createdAt }));
+                .map(([id, c]) => ({ 
+                    id, key: c.tempKey, secret: c.sessionSecret, 
+                    creator: c.isCreator, createdAt: c.createdAt,
+                    version: SESSION_VERSION 
+                }));
             if (!sessions.length) { localStorage.removeItem(PONG_SESSIONS_KEY); return; }
             const sk = await getStorageKey();
             const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -294,8 +294,11 @@
                 const check = await apiCall('GET', '/beacon?id=' + sc.id);
                 if (check && check.matched) {
                     channels[sc.id] = {
-                        tempKey: sc.key, sessionSecret: sc.secret,
-                        status: 'open', isCreator: sc.creator, createdAt: sc.createdAt,
+                        tempKey: sc.key, 
+                        sessionSecret: sc.secret,
+                        status: 'open', 
+                        isCreator: sc.creator, 
+                        createdAt: sc.createdAt,
                     };
                     startPolling(sc.id);
                     restored.push({ channelId: sc.id, secret: sc.secret, role: sc.creator ? 'creator' : 'receiver' });
@@ -325,15 +328,13 @@
             return;
         }
         const sid = beaconRes.sessionId;
-        const sessionSecret = await sha256(tempKey + 'salt_v4');
+        const sessionSecret = await sha256(tempKey + '_sherwood_v4');
         channels[sid] = { tempKey, sessionSecret, status: 'waiting', isCreator: true, createdAt: Date.now() };
-        const appBase = parentOrigin.includes('ROBINHOOD-P2P') ? 'https://stepweather-prog.github.io/ROBINHOOD-P2P/' : 'https://stepweather-prog.github.io/ROBINHOOD-P2PCall/';
         const link = appBase + '?id=' + sid + '&server=' + currentServer + '#key=' + tempKey;
         sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink: link });
         log('Маяк: ' + sid.substring(0, 8) + '...', 'success');
         updateUI();
 
-        // Ждём подключения
         let matched = false;
         const start = Date.now();
         while (Date.now() - start < 90000) {
@@ -375,7 +376,7 @@
             return;
         }
         const actualSid = findRes.sessionId || sid;
-        const sessionSecret = await sha256(findKey + 'salt_v4');
+        const sessionSecret = await sha256(findKey + '_sherwood_v4');
         channels[actualSid] = { tempKey: findKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() };
         startPolling(actualSid);
         saveSessions();
@@ -386,7 +387,6 @@
 
     // Обработка сообщений от родителя
     window.addEventListener('message', (event) => {
-        // Проверяем origin
         try {
             const origin = new URL(event.origin).hostname;
             const allowed = ['stepweather-prog.github.io', 'localhost', '127.0.0.1', ''];
@@ -396,9 +396,6 @@
         if (event.source !== window.parent) return;
         const data = event.data;
         if (!data || !data.action) return;
-
-        // Сохраняем origin для генерации ссылок
-        if (event.origin && !parentOrigin) parentOrigin = event.origin;
 
         switch (data.action) {
             case 'handshake':
@@ -430,18 +427,17 @@
                 break;
             case 'cancel-create':
                 log('Создание отменено', 'info');
+                // Очищаем ожидающие маяки
                 break;
             default:
                 break;
         }
     });
 
-    // Переключение серверов по клику
     $('card-render').addEventListener('click', () => switchServer('render'));
     $('card-workers').addEventListener('click', () => switchServer('workers'));
     $('btn-refresh').addEventListener('click', checkAllServers);
 
-    // Восстановление при возврате на вкладку
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             stopAllPolling();
@@ -458,14 +454,13 @@
         stopAllPolling();
     });
 
-    // Инициализация
     async function init() {
         const saved = localStorage.getItem('robinhood_server');
         if (saved && (saved === 'render' || saved === 'workers')) currentServer = saved;
         updateUI();
         await checkAllServers();
         await restoreSessions();
-        log('P2PPong v4.0 готов', 'success');
+        log('P2PPong v4.1 готов [' + (isRobinHoodP2P ? 'P2P' : 'Call') + ']', 'success');
     }
 
     init();
