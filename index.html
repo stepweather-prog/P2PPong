@@ -175,7 +175,7 @@ async function createSession(clientTempKey){
     if(count>=max){sendToParent({type:'error',text:isPWA?'Максимум '+max+' каналов.':'Максимум '+max+' каналов. Установите PWA для 20.'});if(!isPWA)sendToParent({type:'install-prompt'});return}
     const tempKey=clientTempKey||generateToken();
     const tempKeyHash=await sha256(tempKey);
-    const beaconRes=await apiCall('POST','/beacon',{tempKeyHash});
+    const beaconRes = await apiCall('POST', '/beacon', { tempKey: tempKeyHash });
     if(!beaconRes||!beaconRes.sessionId){sendToParent({type:'error',text:'Сервер не отвечает. Попробуйте переключить.'});return}
     const sid=beaconRes.sessionId,sessionSecret=await sha256(tempKey);
     channels[sid]={tempKey,sessionSecret,status:'waiting',isCreator:true,createdAt:Date.now()};
