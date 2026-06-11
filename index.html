@@ -209,12 +209,20 @@
         completeAccept(findRes, sid, findKey);
     }
     async function completeAccept(findRes, sid, findKey) {
-        const actualSid = findRes.sessionId || sid, sessionSecret = await sha256(findKey); 
-        channels[actualSid] = { tempKey: findKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() }; 
-        startPolling(actualSid); saveSessions(); 
-        sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' }); 
-        log('Подключено!', 'success'); updateUI(); 
+    const actualSid = findRes.sessionId || sid;
+    const sessionSecret = await sha256(findKey); 
+    // Используем ОБА ID для совместимости
+    channels[actualSid] = { tempKey: findKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() };
+    if (actualSid !== sid) {
+        channels[sid] = { tempKey: findKey, sessionSecret, status: 'open', isCreator: false, createdAt: Date.now() };
     }
+    startPolling(actualSid); 
+    if (actualSid !== sid) startPolling(sid);
+    saveSessions(); 
+    sendToParent({ type: 'channel-open', secret: sessionSecret, channelId: actualSid, role: 'receiver' }); 
+    log('Подключено! [sid=' + sid.substring(0,8) + ' actual=' + actualSid.substring(0,8) + ']', 'success'); 
+    updateUI(); 
+}
 
     window.addEventListener('message', (event) => {
         let origin; try { origin = new URL(event.origin).hostname; } catch (e) { return; }
