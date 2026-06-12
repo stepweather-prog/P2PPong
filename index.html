@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>P2PPong v4.1</title>
     <link rel="icon" type="image/png" sizes="192x192" href="https://stepweather-prog.github.io/ROBINHOOD-P2P/assets/avatars/001-.png">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://p2ppong-v2.onrender.com https://robincall.stephanclaps-491.workers.dev; img-src 'self' data: https://stepweather-prog.github.io;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' https://p2ppong.onrender.com https://p2ppong-v2.onrender.com https://robincall.stephanclaps-491.workers.dev https://* wss://* img-src 'self' data: https://stepweather-prog.github.io;">
     <style>
         :root { --bg: #0d1a0c; --bg2: #1a2a1f; --accent: #c4a24b; --accent2: #e8d5a3; --text: #e8e2c7; --dim: #b8a87a; --border: #c4a24b; --green: #4caf50; --red: #f44336; --orange: #ff9800; --blue: #4bc4d0; }
         * { margin:0; padding:0; box-sizing:border-box; }
@@ -298,15 +298,16 @@
 
     async function waitForMatch(sid) {
         let matched = false; const start = Date.now(); 
-        while (Date.now() - start < 90000) { 
-            let check = await apiCall('GET', '/beacon?id=' + sid);
-            // Если не нашли через API — пробуем Mesh
-            if (!check?.matched && meshPeers.length > 0) {
-                check = await meshFindBeacon(sid, channels[sid]?.tempKey);
-            }
-            if (check?.matched) { matched = true; break; } 
-            await new Promise(r => setTimeout(r, 5000)); 
-        } 
+        let meshTried = false;
+while (Date.now() - start < 90000) { 
+    let check = await apiCall('GET', '/beacon?id=' + sid);
+    if (!check?.matched && !meshTried && meshPeers.length > 0) {
+        check = await meshFindBeacon(sid, channels[sid]?.tempKey);
+        meshTried = true; // ← ТОЛЬКО ОДИН РАЗ пробуем Mesh
+    }
+    if (check?.matched) { matched = true; break; } 
+    await new Promise(r => setTimeout(r, 5000)); 
+} 
         if (!matched) { delete channels[sid]; sendToParent({ type: 'error', text: 'Таймаут ожидания' }); updateUI(); return; } 
         channels[sid].status = 'open'; startPolling(sid); saveSessions(); 
         sendToParent({ type: 'channel-open', secret: channels[sid].sessionSecret, channelId: sid, role: 'creator' }); 
