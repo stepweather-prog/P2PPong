@@ -58,66 +58,31 @@
     </div>
 </div>
 <script>
-/**
- * P2PPong v5.0 Standalone — Бронебойная сигнальная машина (Пинбол)
- */
-(function() {
-    'use strict';
 
+/**
+ * P2PPong v5.0 — Бронебойная сигнальная машина
+ */
+const P2PPong = (() => {
     const SERVERS = [
-        { id: 'render', url: 'https://p2ppong-v2.onrender.com' },
+        { id: 'render', url: 'https://p2ppong.onrender.com' },
         { id: 'workers', url: 'https://robincall.stephanclaps-491.workers.dev' }
     ];
-
     let channels = {};
     let pollIntervals = {};
     let callbacks = {};
     let peerId = null;
     let sessionId = null;
     let isInitialized = false;
-    let handshakeSecret = null;
 
-    function $(id) { return document.getElementById(id); }
-
-    function log(msg, type = 'info') {
-        console.log('[P2PPong]', msg);
-        const box = $('log-box');
-        if (box) {
-            const entry = document.createElement('div');
-            entry.className = 'log-entry ' + type;
-            entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-            box.insertBefore(entry, box.firstChild);
-            if (box.children.length > 50) box.lastChild.remove();
-        }
-    }
-
-    function updateUI() {
-        const chCount = Object.keys(channels).length;
-        const el = $('ch-count'); if (el) el.textContent = chCount;
-        const nid = $('node-id'); if (nid) nid.textContent = (peerId || '---').substring(0, 10) + '...';
-        const dot = $('status-dot'); if (dot) dot.className = 'status-dot online';
-        const txt = $('status-text'); if (txt) txt.textContent = '✅ Готов';
-    }
-
-    function generateToken() {
-        return crypto.randomUUID?.() || Math.random().toString(36).substring(2) + Date.now().toString(36);
-    }
-
-    async function sha256(text) {
-        const data = new TextEncoder().encode(text);
-        const hash = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('');
-    }
+    function generateToken() { return crypto.randomUUID?.() || Math.random().toString(36).substring(2)+Date.now().toString(36); }
+    async function sha256(text) { const data = new TextEncoder().encode(text); const hash = await crypto.subtle.digest('SHA-256', data); return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join(''); }
+    function log(msg) { console.log('[P2PPong]', msg); }
 
     async function openDB() {
         return new Promise((resolve, reject) => {
             const req = indexedDB.open('P2PPongSecure', 1);
-            req.onupgradeneeded = () => {
-                if (!req.result.objectStoreNames.contains('identity'))
-                    req.result.createObjectStore('identity', { keyPath: 'id' });
-            };
-            req.onsuccess = () => resolve(req.result);
-            req.onerror = () => reject(req.error);
+            req.onupgradeneeded = () => { if (!req.result.objectStoreNames.contains('identity')) req.result.createObjectStore('identity', { keyPath: 'id' }); };
+            req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
         });
     }
 
@@ -127,64 +92,23 @@
             const db = await openDB();
             const tx = db.transaction('identity', 'readonly');
             const store = tx.objectStore('identity');
-            const stored = await new Promise((resolve, reject) => {
-                const req = store.get('peerId');
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => reject(req.error);
-            });
+            const stored = await new Promise((resolve, reject) => { const req = store.get('peerId'); req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error); });
             if (stored?.value) { peerId = stored.value; return peerId; }
-        } catch (e) { log('IndexedDB недоступна', 'error'); }
+        } catch (e) { log('IndexedDB недоступна'); }
         peerId = generateToken().substring(0, 16);
-        try {
-            const db = await openDB();
-            const tx = db.transaction('identity', 'readwrite');
-            tx.objectStore('identity').put({ id: 'peerId', value: peerId });
-        } catch (e) {}
+        try { const db = await openDB(); const tx = db.transaction('identity', 'readwrite'); tx.objectStore('identity').put({ id: 'peerId', value: peerId }); } catch (e) {}
         return peerId;
     }
 
-    async function deriveKey(secret) {
-        const hash = await sha256(secret);
-        const keyBytes = new TextEncoder().encode(hash.substring(0, 32));
-        return await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-    }
-
-    async function encryptPacket(plaintext, secret) {
-        try {
-            const key = await deriveKey(secret);
-            const iv = crypto.getRandomValues(new Uint8Array(12));
-            const encoded = new TextEncoder().encode(plaintext);
-            const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
-            const combined = new Uint8Array(iv.length + new Uint8Array(ciphertext).length);
-            combined.set(iv); combined.set(new Uint8Array(ciphertext), iv.length);
-            return '🔐' + btoa(String.fromCharCode(...combined));
-        } catch (e) { return plaintext; }
-    }
-
-    async function decryptPacket(encryptedText, secret) {
-        if (!encryptedText || !encryptedText.startsWith('🔐')) return null;
-        try {
-            const key = await deriveKey(secret);
-            const combined = Uint8Array.from(atob(encryptedText.substring(2)), c => c.charCodeAt(0));
-            const iv = combined.slice(0, 12); const ct = combined.slice(12);
-            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct);
-            return new TextDecoder().decode(decrypted);
-        } catch (e) { return null; }
-    }
+    async function deriveKey(secret) { const hash = await sha256(secret); const keyBytes = new TextEncoder().encode(hash.substring(0, 32)); return await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']); }
+    async function encryptPacket(plaintext, secret) { try { const key = await deriveKey(secret); const iv = crypto.getRandomValues(new Uint8Array(12)); const encoded = new TextEncoder().encode(plaintext); const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded); const combined = new Uint8Array(iv.length + new Uint8Array(ciphertext).length); combined.set(iv); combined.set(new Uint8Array(ciphertext), iv.length); return '🔐' + btoa(String.fromCharCode(...combined)); } catch (e) { return plaintext; } }
+    async function decryptPacket(encryptedText, secret) { if (!encryptedText || !encryptedText.startsWith('🔐')) return null; try { const key = await deriveKey(secret); const combined = Uint8Array.from(atob(encryptedText.substring(2)), c => c.charCodeAt(0)); const iv = combined.slice(0, 12); const ct = combined.slice(12); const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ct); return new TextDecoder().decode(decrypted); } catch (e) { return null; } }
 
     async function apiCall(serverId, method, path, body = null) {
-        const server = SERVERS.find(s => s.id === serverId);
-        if (!server) return null;
-        const ctrl = new AbortController();
-        const timeout = setTimeout(() => ctrl.abort(), serverId === 'workers' ? 5000 : 10000);
-        try {
-            const opts = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal };
-            if (body) opts.body = JSON.stringify(body);
-            const res = await fetch(server.url + path, opts);
-            clearTimeout(timeout);
-            if (!res.ok) return null;
-            return await res.json();
-        } catch (e) { clearTimeout(timeout); return null; }
+        const server = SERVERS.find(s => s.id === serverId); if (!server) return null;
+        const ctrl = new AbortController(); const timeout = setTimeout(() => ctrl.abort(), serverId === 'workers' ? 5000 : 10000);
+        try { const opts = { method, headers: { 'Content-Type': 'application/json' }, signal: ctrl.signal }; if (body) opts.body = JSON.stringify(body); const res = await fetch(server.url + path, opts); clearTimeout(timeout); if (!res.ok) return null; return await res.json(); }
+        catch (e) { clearTimeout(timeout); return null; }
     }
 
     function startPolling(sid, serverId) {
@@ -202,140 +126,49 @@
                 try { const parsed = JSON.parse(decrypted); sender = parsed.sender; text = parsed.text || decrypted; } catch (e) {}
                 if (sender === sessionId) { const msgTime = m.time > 9999999999 ? m.time : m.time * 1000; lastTime = Math.max(lastTime, msgTime); continue; }
                 if (callbacks.onMessage) callbacks.onMessage({ text, channelId: sid, sender });
-                sendToParent({ type: 'message', text, channelId: sid, sender });
                 const msgTime = m.time > 9999999999 ? m.time : m.time * 1000; lastTime = Math.max(lastTime, msgTime);
             }
         };
         poll(); pollIntervals[sid] = setInterval(poll, 4000);
     }
-
     function stopPolling(sid) { if (pollIntervals[sid]) { clearInterval(pollIntervals[sid]); delete pollIntervals[sid]; } }
-    function stopAllPolling() { Object.keys(pollIntervals).forEach(stopPolling); }
-
-    function sendToParent(msg) {
-        if (window.parent && window.parent !== window) {
-            try { window.parent.postMessage(msg, '*'); } catch (e) {}
-        }
-    }
 
     async function createArrow() {
-        await ensureInit();
-        const tempKey = generateToken();
-        const tempKeyHash = await sha256(tempKey);
-        const sessionSecret = tempKey;
-        log('Создание маяка...');
+        await ensureInit(); const tempKey = generateToken(); const tempKeyHash = await sha256(tempKey); const sessionSecret = tempKey;
         const results = [];
-        for (const server of SERVERS) {
-            const body = server.id === 'workers' ? { tempKeyHash, publicId: peerId } : { tempKey: tempKey, tempKeyHash, publicId: peerId };
-            const res = await apiCall(server.id, 'POST', '/beacon', body);
-            if (res?.sessionId) results.push({ sessionId: res.sessionId, server: server.id });
-        }
-        if (results.length === 0) { sendToParent({ type: 'error', text: 'Серверы не отвечают' }); return; }
+        for (const server of SERVERS) { const body = server.id === 'workers' ? { tempKeyHash, publicId: peerId } : { tempKey: tempKey, tempKeyHash, publicId: peerId }; const res = await apiCall(server.id, 'POST', '/beacon', body); if (res?.sessionId) results.push({ sessionId: res.sessionId, server: server.id }); }
+        if (results.length === 0) { if (callbacks.onError) callbacks.onError({ text: 'Серверы не отвечают' }); return; }
         const primary = results[0]; const sid = primary.sessionId;
         channels[sid] = { status: 'waiting', sessionSecret, server: primary.server, peerId, allServers: results.map(r => r.server) };
-        const serversParam = results.map(r => r.server).join(',');
-        const fullLink = 'https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=' + sid + '&servers=' + serversParam + '&peer=' + peerId + '&key=' + tempKey;
+        const serversParam = results.map(r => r.server).join(','); const fullLink = `https://stepweather-prog.github.io/ROBINHOOD-P2P/?id=${sid}&servers=${serversParam}&peer=${peerId}&key=${tempKey}`;
         if (callbacks.onSessionCreated) callbacks.onSessionCreated({ fullLink, peerId, key: tempKey });
-        sendToParent({ type: 'session-created', sessionId: sid, key: tempKey, fullLink, peerId });
         let matched = false; const start = Date.now();
-        while (Date.now() - start < 90000) {
-            const checks = await Promise.all(results.map(r => apiCall(r.server, 'GET', '/beacon?id=' + r.sessionId)));
-            if (checks.some(c => c?.matched)) { matched = true; break; }
-            await new Promise(r => setTimeout(r, 5000));
-        }
-        if (!matched) { delete channels[sid]; sendToParent({ type: 'error', text: 'Таймаут ожидания' }); return; }
+        while (Date.now() - start < 90000) { const checks = await Promise.all(results.map(r => apiCall(r.server, 'GET', '/beacon?id=' + r.sessionId))); if (checks.some(c => c?.matched)) { matched = true; break; } await new Promise(r => setTimeout(r, 5000)); }
+        if (!matched) { delete channels[sid]; if (callbacks.onError) callbacks.onError({ text: 'Таймаут ожидания' }); return; }
         channels[sid].status = 'open'; startPolling(sid, channels[sid].server);
-        updateUI();
         if (callbacks.onChannelOpen) callbacks.onChannelOpen({ channelId: sid, role: 'creator', peerId });
-        sendToParent({ type: 'channel-open', channelId: sid, role: 'creator', peerId });
-        log('Канал открыт!', 'success');
     }
 
     async function acceptArrow(peerIdFromLink, tempKey) {
-        await ensureInit();
-        const keyHash = await sha256(tempKey);
-        const sessionSecret = tempKey;
-        log('Поиск маяка для пира ' + peerIdFromLink + '...');
-        for (const server of SERVERS) {
-            try {
-                const res = await apiCall(server.id, 'POST', '/find-by-peer', { targetPublicId: peerIdFromLink, myPublicId: peerId, tempKeyHash: keyHash });
-                if (res?.status === 'matched') { await openChannel(res.sessionId, server.id, sessionSecret, peerIdFromLink); return; }
-            } catch (e) {}
-        }
-        const urlParams = new URLSearchParams(window.location.search);
-        const serversParam = urlParams.get('servers') || 'render,workers';
-        const serversList = serversParam.split(',');
-        const sid = urlParams.get('id');
-        for (const srvId of serversList) {
-            const body = srvId === 'workers' ? { tempKeyHash: keyHash } : { tempKey };
-            const res = await apiCall(srvId, 'POST', '/find', body);
-            if (res?.status === 'matched') { await openChannel(res.sessionId || sid, srvId, sessionSecret, peerIdFromLink); return; }
-        }
-        sendToParent({ type: 'error', text: 'Маяк не найден' });
-    }
-
-    async function openChannel(sid, serverId, sessionSecret, peerIdFromLink) {
-        channels[sid] = { status: 'open', sessionSecret, server: serverId, peerId: peerIdFromLink };
-        startPolling(sid, serverId);
-        updateUI();
-        if (callbacks.onChannelOpen) callbacks.onChannelOpen({ channelId: sid, role: 'receiver', peerId: peerIdFromLink });
-        sendToParent({ type: 'channel-open', channelId: sid, role: 'receiver', peerId: peerIdFromLink });
-        log('Подключено через ' + serverId + '!', 'success');
+        await ensureInit(); const keyHash = await sha256(tempKey); const sessionSecret = tempKey;
+        const urlParams = new URLSearchParams(window.location.search); const serversParam = urlParams.get('servers') || 'render,workers'; const serversList = serversParam.split(','); const sid = urlParams.get('id');
+        for (const srvId of serversList) { const body = srvId === 'workers' ? { tempKeyHash: keyHash } : { tempKey }; const res = await apiCall(srvId, 'POST', '/find', body); if (res?.status === 'matched') { channels[res.sessionId || sid] = { status: 'open', sessionSecret, server: srvId, peerId: peerIdFromLink }; startPolling(res.sessionId || sid, srvId); if (callbacks.onChannelOpen) callbacks.onChannelOpen({ channelId: res.sessionId || sid, role: 'receiver', peerId: peerIdFromLink }); return; } }
+        if (callbacks.onError) callbacks.onError({ text: 'Маяк не найден' });
     }
 
     async function sendMessage(channelId, text) {
-        await ensureInit();
-        const ch = channels[channelId];
-        if (!ch) { sendToParent({ type: 'error', text: 'Канал не найден', channelId }); return; }
-        const payload = JSON.stringify({ text, sender: sessionId, time: Date.now() });
-        const encrypted = await encryptPacket(payload, ch.sessionSecret);
+        await ensureInit(); const ch = channels[channelId]; if (!ch) { if (callbacks.onError) callbacks.onError({ text: 'Канал не найден', channelId }); return; }
+        const payload = JSON.stringify({ text, sender: sessionId, time: Date.now() }); const encrypted = await encryptPacket(payload, ch.sessionSecret);
         const res = await apiCall(ch.server, 'POST', '/message', { sessionId: channelId, packet: encrypted });
-        if (!res) { delete channels[channelId]; stopPolling(channelId); updateUI(); sendToParent({ type: 'error', text: 'session_not_found', channelId }); }
+        if (!res) { delete channels[channelId]; stopPolling(channelId); if (callbacks.onError) callbacks.onError({ text: 'session_not_found', channelId }); }
     }
 
     function on(event, cb) { callbacks[event] = cb; }
     function getPeerId() { return peerId; }
-
-    async function checkServers() {
-        for (const server of SERVERS) {
-            const ping = await apiCall(server.id, 'GET', '/ping');
-            const status = ping ? 'online' : 'offline';
-            const el = $(server.id + '-status');
-            if (el) el.textContent = (status === 'online' ? '🟢 ' : '🔴 ') + (status === 'online' ? 'Онлайн' : 'Офлайн');
-            const card = $('card-' + server.id);
-            if (card) card.classList.toggle('active', status === 'online');
-        }
-    }
-
     async function ensureInit() { if (!isInitialized) await init(); }
-
-    async function init() {
-        if (isInitialized) return;
-        sessionId = generateToken();
-        await getOrCreatePeerId();
-        await checkServers();
-        updateUI();
-        handshakeSecret = generateToken();
-        sendToParent({ type: 'pong-ready', handshake: handshakeSecret });
-        isInitialized = true;
-        log('P2PPong v5.0 готов. PeerId: ' + peerId.substring(0, 10) + '...', 'success');
-        if (callbacks.onReady) callbacks.onReady({ peerId });
-    }
-
-    window.addEventListener('message', (event) => {
-        if (event.source !== window.parent) return;
-        const data = event.data;
-        if (!data || !data.action) return;
-        if (data.action === 'handshake') { if (data.handshake === handshakeSecret) { handshakeSecret = null; sendToParent({ type: 'handshake-ok' }); } return; }
-        if (data.action === 'create') { createArrow(); return; }
-        if (data.action === 'accept' && data.id) { acceptArrow(data.id, data.key || ''); return; }
-        if (data.action === 'send') { sendMessage(data.channelId || Object.keys(channels)[0], data.text); return; }
-        if (data.action === 'get-status') { sendToParent({ type: 'server-status', channels: Object.keys(channels).length, peerId }); return; }
-    });
-
-    $('btn-refresh')?.addEventListener('click', checkServers);
-    window.addEventListener('beforeunload', stopAllPolling);
-    init().catch(e => log('Ошибка инициализации: ' + e.message, 'error'));
+    async function init() { if (isInitialized) return; sessionId = generateToken(); await getOrCreatePeerId(); isInitialized = true; log('P2PPong v5.0 готов. PeerId: ' + peerId.substring(0, 10) + '...'); if (callbacks.onReady) callbacks.onReady({ peerId }); }
+    if (typeof window !== 'undefined') init().catch(e => console.error('[P2PPong] Init error:', e));
+    return { init, createArrow, acceptArrow, sendMessage, on, getPeerId };
 })();
 </script>
 </body>
