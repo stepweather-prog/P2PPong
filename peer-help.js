@@ -3,7 +3,7 @@
 (function(){
 'use strict';
 if(!window.RTCPeerConnection&&!window.webkitRTCPeerConnection)return;
-var PEER_HELP_VERSION='1.0.1';
+var PEER_HELP_VERSION='1.0.2';
 var ANNOUNCE_INTERVAL=300000;
 var CLEANUP_INTERVAL=600000;
 var MAX_PEERS=10;
