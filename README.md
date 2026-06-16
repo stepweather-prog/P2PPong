@@ -133,6 +133,4 @@ RobinHood P2P	github.com/stepweather-prog/ROBINHOOD-P2P
 Лицензия
 MIT. Проект «как есть», без гарантий. Криптография не проходила независимый аудит.
 
----
-
 
