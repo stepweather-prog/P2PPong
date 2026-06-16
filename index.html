@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2PPong v5.0 — Слепой Улей + HMAC + Light Ratchet</title>
+    <title>P2PPong v5.0 — Слепой Улей</title>
     <style>
         :root{--bg:#0a0a0a;--panel:#111;--accent:#c4a24b;--accent2:#e8d5a3;--text:#ccc;--dim:#888;--green:#4caf50;--red:#f44336;--orange:#ff9800}
         *{margin:0;padding:0;box-sizing:border-box}
@@ -11,68 +11,49 @@
         .panel{background:var(--panel);border:1px solid #333;border-radius:12px;padding:14px;margin-bottom:10px;max-width:680px}
         h2{color:var(--accent2);font-size:1em;margin-bottom:10px}
         .status{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-        .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+        .dot{width:10px;height:10px;border-radius:50%}
         .dot.online{background:var(--green);box-shadow:0 0 8px var(--green)}
-        .dot.offline{background:var(--red)}.dot.busy{background:var(--orange);animation:pulse .8s infinite}
-        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-        .log{background:#000;border-radius:8px;padding:10px;max-height:250px;overflow-y:auto;font-size:.6em;color:var(--dim)}
-        .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--accent)}.log .warn{color:var(--orange)}
-        button{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:rgba(196,162,75,.1);color:var(--accent);cursor:pointer;font-family:monospace;font-size:.75em;margin:3px;transition:.2s}
-        button:hover{background:rgba(196,162,75,.25)}button:disabled{opacity:.4;cursor:not-allowed}
-        button.accept{border-color:var(--green);color:var(--green)}button.danger{border-color:var(--red);color:var(--red)}
-        input,select{padding:8px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:var(--text);font-family:monospace;font-size:.75em;width:100%;margin:3px 0}
+        .dot.offline{background:var(--red)}
+        .log{background:#000;border-radius:8px;padding:10px;max-height:300px;overflow-y:auto;font-size:.6em;color:var(--dim)}
+        .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--accent)}
+        button{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:rgba(196,162,75,.1);color:var(--accent);cursor:pointer;font-family:monospace;font-size:.75em;margin:3px}
+        button:hover{background:rgba(196,162,75,.25)}
+        input{padding:8px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:var(--text);font-family:monospace;font-size:.75em;width:100%;margin:3px 0}
         .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-        .tag{font-size:.6em;padding:2px 8px;border-radius:4px;background:rgba(196,162,75,.1);white-space:nowrap}
+        .tag{font-size:.6em;padding:2px 8px;border-radius:4px;background:rgba(196,162,75,.1)}
         .card{background:rgba(255,255,255,.02);border:1px solid #333;border-radius:8px;padding:10px;margin:6px 0;font-size:.7em}
-        .card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-        .card-title{color:var(--accent2);font-weight:bold}.card-meta{color:var(--dim);font-size:.85em}
-        .dead{opacity:.3;text-decoration:line-through}
-        .secure-tag{font-size:.55em;padding:1px 6px;border-radius:3px;background:rgba(76,175,80,.2);color:var(--green)}
-        .insecure-tag{font-size:.55em;padding:1px 6px;border-radius:3px;background:rgba(244,67,54,.2);color:var(--red)}
+        .card-title{color:var(--accent2)}
     </style>
 </head>
 <body>
 
 <div class="panel">
-    <h2>🕸️ P2PPong v5.0 — Слепой Улей + HMAC + Ratchet</h2>
+    <h2>🕸️ P2PPong v5.0 — Слепой Улей</h2>
     <div class="status">
-        <span class="dot busy" id="status-dot"></span>
+        <span class="dot" id="status-dot"></span>
         <span id="status-text">Инициализация...</span>
-        <span class="tag" id="signal-tag">WS: -</span>
-        <span class="tag" id="dht-tag">DHT: 0</span>
-        <span class="tag" id="security-tag">🔒 HMAC+Ratchet</span>
+        <span class="tag" id="ws-tag">WS: -</span>
     </div>
     <div class="row">
         <span style="font-size:.7em;">Peer ID:</span>
-        <code id="peer-id-display" style="color:var(--accent2);font-size:.7em;">-</code>
-        <button onclick="copyPeerId()" style="font-size:.7em;padding:4px 8px;">📋</button>
+        <code id="peer-id-display" style="color:var(--accent2);">-</code>
+        <button onclick="copyPeerId()">📋</button>
     </div>
-    <div style="font-size:.6em;color:var(--dim);margin-top:4px;">
-        Каналов: <span id="ch-count">0</span> | 
-        Хранилище: <span id="store-count">0</span> |
-        Ratchet: <span id="ratchet-stats">0 оборотов</span>
-    </div>
+    <div style="font-size:.6em;color:var(--dim);">Каналов: <span id="ch-count">0</span></div>
 </div>
 
 <div class="panel">
-    <h2>📡 Маяки</h2>
+    <h2>📡 Маяк</h2>
     <button onclick="createBeacon()">🏹 Создать маяк</button>
-    <div id="beacons-list"></div>
+    <div id="beacon-display" style="font-size:.7em;color:var(--accent);margin-top:8px;word-break:break-all;"></div>
 </div>
 
 <div class="panel">
     <h2>🔗 Подключиться</h2>
     <div class="row">
-        <input type="text" id="target-peer-id" placeholder="Peer ID друга..." style="flex:1;">
-        <button onclick="connectByPeerId()">🤝 По Peer ID</button>
+        <input type="text" id="peer-id-input" placeholder="Peer ID друга..." style="flex:1;">
+        <button onclick="connectByPeerId()">🤝 Подключиться</button>
     </div>
-    <div id="connect-result" style="font-size:.65em;color:var(--dim);margin-top:4px;"></div>
-</div>
-
-<div class="panel">
-    <h2>📞 Заявки</h2>
-    <button onclick="checkRequests()">🔄 Проверить</button>
-    <div id="requests-list"></div>
 </div>
 
 <div class="panel">
@@ -81,30 +62,14 @@
 </div>
 
 <div class="panel">
-    <h2>📤 Отправить блоб</h2>
+    <h2>📤 Сообщение</h2>
     <div class="row">
         <select id="channel-select" style="flex:1;"><option value="">Выбери канал...</option></select>
     </div>
     <div class="row" style="margin-top:4px;">
-        <input type="text" id="blob-input" placeholder="Сообщение..." style="flex:1;">
-        <button onclick="sendBlob()">📤</button>
+        <input type="text" id="msg-input" placeholder="Сообщение..." style="flex:1;">
+        <button onclick="sendMsg()">📤</button>
     </div>
-</div>
-
-<div class="panel">
-    <h2>💾 DHT Хранилище</h2>
-    <div class="row">
-        <input type="text" id="dht-key" placeholder="Ключ..." style="flex:1;">
-        <input type="text" id="dht-value" placeholder="Значение..." style="flex:2;">
-        <button onclick="dhtStoreUI()">💾</button>
-        <button onclick="dhtFindUI()">🔍</button>
-    </div>
-    <div id="dht-find-result" style="font-size:.65em;color:var(--accent);margin-top:4px;"></div>
-</div>
-
-<div class="panel">
-    <h2>📋 Таблица DHT</h2>
-    <div id="routing-table"></div>
 </div>
 
 <div class="panel">
@@ -113,287 +78,117 @@
 </div>
 
 <script>
-// ==================== P2PPong v5.0 — СЛЕПОЙ УЛЕЙ + HMAC + LIGHT RATCHET ====================
-const PP4={_peerId:null,_beacons:{},_channels:{},_requests:[],_ws:null,_wsUrl:'wss://robincall.stephanclaps-491.workers.dev/ws',_wsReconnectDelay:1000,_maxReconnectDelay:30000};
-const DHT={_nodeId:null,_buckets:[],_storage:{},_k:20,_alpha:3,_peers:new Map(),_signalSend:null};
+// ==================== P2PPong v5.0 — ЧИСТЫЙ СЛЕПОЙ УЛЕЙ ====================
+const PP4={_peerId:null,_beacons:{},_channels:{},_ws:null,_wsUrl:'wss://robincall.stephanclaps-491.workers.dev/ws',_wsReconnectDelay:1000,_maxReconnectDelay:30000};
 if(!window.crypto?.subtle)throw new Error('Требуется HTTPS');
-
-// ========== КРИПТОГРАФИЯ ==========
 const RND=()=>{const a=new Uint32Array(4);crypto.getRandomValues(a);return[...a].map(x=>x.toString(16).padStart(8,'0')).join('');};
 const SHA=async t=>{const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('');};
-
 async function generateHardwarePeerId(){const p=[];try{const c=document.createElement('canvas');const gl=c.getContext('webgl');const ext=gl.getExtension('WEBGL_debug_renderer_info');if(ext){p.push(gl.getParameter(ext.UNMASKED_VENDOR_WEBGL));p.push(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL));}}catch(e){}try{const ctx=new AudioContext();p.push(ctx.sampleRate.toString());p.push(ctx.destination.maxChannelCount.toString());ctx.close();}catch(e){}p.push(screen.width+'x'+screen.height,screen.colorDepth.toString(),navigator.hardwareConcurrency||'',navigator.deviceMemory||'');let s=localStorage.getItem('pp4_hw_salt');if(!s){s=RND();localStorage.setItem('pp4_hw_salt',s);}p.push(s);const h=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(p.join('|')));return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,'0')).join('').substring(0,32);}
-
 async function generateKeyPair(){return await crypto.subtle.generateKey({name:'ECDH',namedCurve:'P-256'},true,['deriveBits']);}
 async function exportPublicKey(kp){const r=await crypto.subtle.exportKey('raw',kp.publicKey);return btoa(String.fromCharCode(...new Uint8Array(r)));}
 async function importPublicKey(b64){const r=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));return await crypto.subtle.importKey('raw',r,{name:'ECDH',namedCurve:'P-256'},false,[]);}
 async function deriveSecret(kp,remotePubKey){const b=await crypto.subtle.deriveBits({name:'ECDH',public:remotePubKey},kp.privateKey,256);return Array.from(new Uint8Array(b)).map(b=>b.toString(16).padStart(2,'0')).join('');}
-
 async function encryptAES(text,secret){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret.substring(0,32)),{name:'AES-GCM'},false,['encrypt']);const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(text));const c=new Uint8Array(iv.length+new Uint8Array(ct).length);c.set(iv);c.set(new Uint8Array(ct),iv.length);return btoa(String.fromCharCode(...c));}
-
 async function decryptAES(enc,secret){try{const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret.substring(0,32)),{name:'AES-GCM'},false,['decrypt']);const c=Uint8Array.from(atob(enc),x=>x.charCodeAt(0));return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:c.slice(0,12)},k,c.slice(12)));}catch(e){return null;}}
 
-// ========== HMAC + LIGHT RATCHET ==========
-async function computeHMAC(data, secret) {
-    const hmacKey = await crypto.subtle.importKey('raw', 
-        new TextEncoder().encode(secret.substring(0, 32)),
-        {name: 'HMAC', hash: 'SHA-256'}, false, ['sign']);
-    const signature = await crypto.subtle.sign('HMAC', hmacKey, new TextEncoder().encode(data));
-    return btoa(String.fromCharCode(...new Uint8Array(signature)));
+// ========== МАЯКИ ЧЕРЕЗ БЛОБЫ ==========
+const BLOB_NS='00000000000000000000000000000000';
+
+async function createBeacon(){
+    const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const nonce=RND();const bid=RND();
+    const beaconKey=await SHA(nonce+'beacon');
+    const inner=await encryptAES(JSON.stringify({nonce:nonce,timestamp:Date.now(),peerId:PP4._peerId}),beaconKey);
+    const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner};
+    PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+1800000};
+    broadcastBlob(JSON.stringify(beacon),BLOB_NS);
+    document.getElementById('beacon-display').textContent='Твой Peer ID: '+PP4._peerId;
+    log('🏹 Маяк создан','ok');
 }
 
-async function verifyHMAC(data, signature, secret) {
-    try {
-        const hmacKey = await crypto.subtle.importKey('raw',
-            new TextEncoder().encode(secret.substring(0, 32)),
-            {name: 'HMAC', hash: 'SHA-256'}, false, ['verify']);
-        const sigBytes = Uint8Array.from(atob(signature), c => c.charCodeAt(0));
-        return await crypto.subtle.verify('HMAC', hmacKey, sigBytes, new TextEncoder().encode(data));
-    } catch(e) {
-        return false;
+async function connectByPeerId(){
+    const targetId=document.getElementById('peer-id-input').value.trim();
+    if(!targetId){log('Введи Peer ID','err');return;}
+    const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const nonce=RND();const bid=RND();
+    const beaconKey=await SHA(nonce+'beacon');
+    const inner=await encryptAES(JSON.stringify({nonce:nonce,timestamp:Date.now(),peerId:PP4._peerId}),beaconKey);
+    PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+300000};
+    const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner,targetPeerId:targetId};
+    broadcastBlob(JSON.stringify(beacon),BLOB_NS);
+    log('🤝 Запрос отправлен','info');
+}
+
+async function handleIncomingBlob(blobData,channelId){
+    let data;try{data=JSON.parse(blobData);}catch(e){return;}
+    if(data.type==='beacon'&&data.pubKey&&data.inner){
+        if(data.targetPeerId&&data.targetPeerId!==PP4._peerId)return;
+        const remotePubKey=await importPublicKey(data.pubKey);const kp=await generateKeyPair();const myPubKey=await exportPublicKey(kp);
+        const ss=await deriveSecret(kp,remotePubKey);const chId=RND();
+        PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
+        broadcastBlob(JSON.stringify({type:'beacon-response',pubKey:myPubKey,peerId:PP4._peerId,inner:data.inner}),BLOB_NS);
+        log('✅ Канал открыт!','ok');renderAll();return;
     }
-}
-
-async function advanceRatchet(ch) {
-    const oldKey = ch.ratchetKey || ch.secret;
-    const salt = (ch.ratchetIndex || 0).toString(16).padStart(16, '0');
-    const newKey = await SHA(oldKey + salt);
-    ch.ratchetKey = newKey;
-    ch.ratchetIndex = (ch.ratchetIndex || 0) + 1;
-    
-    // Сохраняем старый ключ для дешифровки потерянных сообщений
-    if (!ch.oldKeys) ch.oldKeys = [];
-    ch.oldKeys.push({index: ch.ratchetIndex - 1, key: oldKey});
-    if (ch.oldKeys.length > 50) ch.oldKeys.shift(); // Ограничиваем историю
-    
-    updateRatchetStats();
-    return newKey;
-}
-
-async function packBlob(jsonString, ch) {
-    // 1. Добавляем временную метку и случайный паддинг
-    const padSize = Math.floor(Math.random() * 50) + 20;
-    const randomPad = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(padSize))));
-    
-    const data = JSON.stringify({
-        d: jsonString,
-        t: Date.now(),
-        n: RND(),
-        pad: randomPad,
-        ri: ch.ratchetIndex || 0 // Индекс ratchet для синхронизации
-    });
-    
-    // 2. Вычисляем HMAC
-    const currentKey = ch.ratchetKey || ch.secret;
-    const hmac = await computeHMAC(data, currentKey);
-    
-    // 3. Формируем пакет: HMAC|DATA
-    const packed = hmac + '|' + data;
-    
-    // 4. Фиксированный паддинг до 4096
-    let padded = packed;
-    if (padded.length < 4096) {
-        const pad = crypto.getRandomValues(new Uint8Array(4096 - padded.length));
-        padded += String.fromCharCode(...pad);
-    } else {
-        padded = padded.substring(0, 4096);
-    }
-    
-    // 5. Продвигаем ratchet ПОСЛЕ формирования пакета
-    await advanceRatchet(ch);
-    
-    return await encryptAES(padded, ch.secret);
-}
-
-async function unpackBlob(blob, ch) {
-    // 1. Расшифровываем
-    const dec = await decryptAES(blob, ch.secret);
-    if (!dec) return null;
-    
-    // 2. Пробуем текущий ключ ratchet
-    let result = await tryDecryptWithKey(dec, ch.ratchetKey || ch.secret);
-    if (result) return result;
-    
-    // 3. Пробуем старые ключи
-    if (ch.oldKeys) {
-        for (let i = ch.oldKeys.length - 1; i >= 0; i--) {
-            result = await tryDecryptWithKey(dec, ch.oldKeys[i].key);
-            if (result) return result;
+    if(data.type==='beacon-response'&&data.pubKey&&data.inner){
+        for(const[bid,b]of Object.entries(PP4._beacons)){
+            if(!b.beaconKey)continue;const dec=await decryptAES(data.inner,b.beaconKey);if(!dec)continue;
+            let payload;try{payload=JSON.parse(dec);}catch(e){continue;}if(payload.nonce!==b.nonce)continue;
+            const remotePubKey=await importPublicKey(data.pubKey);const ss=await deriveSecret(b.keyPair,remotePubKey);const chId=RND();
+            PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
+            delete PP4._beacons[bid];log('✅ Канал открыт!','ok');renderAll();return;
         }
     }
-    
-    return null;
-}
-
-async function tryDecryptWithKey(decrypted, key) {
-    const separatorIndex = decrypted.indexOf('|');
-    if (separatorIndex === -1) return null;
-    
-    const hmac = decrypted.substring(0, separatorIndex);
-    const data = decrypted.substring(separatorIndex + 1).trim().replace(/\x00+$/, '');
-    
-    // Проверяем HMAC
-    const valid = await verifyHMAC(data, hmac, key);
-    if (!valid) return null;
-    
-    try {
-        const parsed = JSON.parse(data);
-        // Удаляем технические поля
-        delete parsed.pad;
-        delete parsed.ri;
-        return parsed;
-    } catch(e) {
-        return null;
+    for(const[id,ch]of Object.entries(PP4._channels)){
+        if(!ch.secret)continue;const u=await decryptAES(blobData,ch.secret);if(!u)continue;
+        try{const msg=JSON.parse(u);ch.blobs.push({...msg,from:'them'});ch.expires=Date.now()+600000;
+        log('📩 '+((msg.d||'').substring(0,30)),'info');renderAll();return;}catch(e){}
     }
 }
 
-let pendingDH={};
+function broadcastBlob(packed,channelId){
+    if(PP4._ws&&PP4._ws.readyState===WebSocket.OPEN){
+        PP4._ws.send(JSON.stringify({type:'blob',channelId:channelId||BLOB_NS,blob:packed,peerId:PP4._peerId}));
+    }
+}
 
-// ========== DHT KADEMLIA ==========
-function xorDistance(id1,id2){const len=Math.min(id1.length,id2.length);let dist='';for(let i=0;i<len;i++)dist+=(parseInt(id1[i],16)^parseInt(id2[i],16)).toString(16);return BigInt('0x'+dist);}
-function getBucketIndex(dist){if(dist===0n)return 0;return dist.toString(2).length-1;}
-function initBuckets(){DHT._buckets=Array.from({length:256},()=>[]);}
-function addPeer(peerId,conn){const dist=xorDistance(DHT._nodeId,peerId);const idx=Math.min(getBucketIndex(dist),255);const bucket=DHT._buckets[idx];const existing=bucket.findIndex(p=>p.id===peerId);if(existing>=0)bucket.splice(existing,1);bucket.unshift({id:peerId,conn,lastSeen:Date.now()});if(bucket.length>DHT._k)bucket.pop();DHT._peers.set(peerId,{conn,lastSeen:Date.now()});renderRoutingTable();updateStats();}
-function getClosestPeers(targetId,count=DHT._k){const all=[];for(const bucket of DHT._buckets)for(const peer of bucket)all.push({...peer,distance:xorDistance(targetId,peer.id)});all.sort((a,b)=>(a.distance<b.distance?-1:a.distance>b.distance?1:0));return all.slice(0,count);}
-function findLocally(key){return DHT._storage[key]||null;}
-const pendingDHTRequests=new Map();
-function setupDataChannel(dc,peerId){dc.onopen=()=>{addPeer(peerId,dc);log(`🔗 DHT: ${peerId.substring(0,8)}...`,'ok');};dc.onclose=()=>{DHT._peers.delete(peerId);for(const bucket of DHT._buckets){const idx=bucket.findIndex(p=>p.id===peerId);if(idx>=0)bucket.splice(idx,1);}log(`🔌 DHT откл: ${peerId.substring(0,8)}...`,'err');renderRoutingTable();updateStats();};dc.onmessage=(e)=>{const msg=JSON.parse(e.data);const peer=DHT._peers.get(peerId);if(peer)peer.lastSeen=Date.now();if(msg.type==='dht-ping'){dc.send(JSON.stringify({type:'dht-pong'}));return;}if(msg.type==='dht-pong')return;if(msg.type==='dht-store'){DHT._storage[msg.key]={value:msg.value,publisher:msg.publisher,timestamp:msg.timestamp};log(`💾 DHT сохр: ${msg.key.substring(0,8)}...`,'info');updateStats();return;}if(msg.type==='dht-find'){const found=DHT._storage[msg.key];dc.send(JSON.stringify(found?{type:'dht-find-response',requestId:msg.requestId,found:true,value:found.value,publisher:found.publisher}:{type:'dht-find-response',requestId:msg.requestId,found:false,peers:getClosestPeers(msg.key,DHT._k).map(p=>({id:p.id}))}));return;}if(msg.type==='dht-find-response'){const resolve=pendingDHTRequests.get(msg.requestId);if(resolve){pendingDHTRequests.delete(msg.requestId);resolve(msg);}return;}if(msg.type==='blob'){handleMessage({type:'blob',blob:msg.blob,channelId:msg.channelId});return;}};}
-async function sendToPeer(peerId,message){const peer=DHT._peers.get(peerId);if(!peer?.conn||peer.conn.readyState!=='open')return;try{peer.conn.send(JSON.stringify(message));}catch(e){}}
-async function sendToPeerAndWait(peerId,message){const requestId=RND();message.requestId=requestId;return new Promise((resolve)=>{pendingDHTRequests.set(requestId,resolve);sendToPeer(peerId,message);setTimeout(()=>{if(pendingDHTRequests.has(requestId)){pendingDHTRequests.delete(requestId);resolve(null);}},5000);});}
-function dhtStore(key,value,publisher){const closest=getClosestPeers(key,DHT._k).filter(p=>p.conn?.readyState==='open');DHT._storage[key]={value,publisher,timestamp:Date.now()};for(const peer of closest)sendToPeer(peer.id,{type:'dht-store',key,value,publisher,timestamp:Date.now()});return closest.length;}
-async function dhtFindValue(key){const local=findLocally(key);if(local)return local;const asked=new Set();let closest=getClosestPeers(key,DHT._alpha);for(let round=0;round<3;round++){const promises=closest.filter(p=>!asked.has(p.id)).map(p=>{asked.add(p.id);return sendToPeerAndWait(p.id,{type:'dht-find',key});});const results=(await Promise.all(promises)).filter(r=>r);for(const r of results){if(r.found){DHT._storage[key]={value:r.value,publisher:r.publisher,timestamp:Date.now()};return r;}if(r.peers)for(const p of r.peers)if(!asked.has(p.id))addPeer(p.id,null);}closest=getClosestPeers(key,DHT._k).filter(p=>!asked.has(p.id)).slice(0,DHT._alpha);if(closest.length===0)break;}return null;}
-async function handleSignal(fromPeerId,signal){const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});pc.ondatachannel=(e)=>{setupDataChannel(e.channel,fromPeerId);};pc.onicecandidate=(e)=>{if(!e.candidate&&pc.localDescription&&DHT._signalSend)DHT._signalSend(fromPeerId,{type:'dht-signal',sdp:JSON.stringify(pc.localDescription)});};await pc.setRemoteDescription(new RTCSessionDescription(JSON.parse(signal.sdp)));const answer=await pc.createAnswer();await pc.setLocalDescription(answer);return pc;}
-async function connectToPeerDHT(peerId){const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});const dc=pc.createDataChannel('dht');setupDataChannel(dc,peerId);pc.onicecandidate=(e)=>{if(!e.candidate&&pc.localDescription&&DHT._signalSend)DHT._signalSend(peerId,{type:'dht-signal',sdp:JSON.stringify(pc.localDescription)});};const offer=await pc.createOffer();await pc.setLocalDescription(offer);return{pc,dc};}
+async function sendMsg(){
+    const text=document.getElementById('msg-input').value.trim();
+    const chId=document.getElementById('channel-select').value;
+    if(!text||!chId)return;
+    const ch=PP4._channels[chId];if(!ch||!ch.secret)return;
+    const packed=await encryptAES(JSON.stringify({d:text,t:Date.now()}),ch.secret);
+    broadcastBlob(packed,chId);
+    ch.blobs.push({d:text,t:Date.now(),from:'me'});ch.expires=Date.now()+600000;
+    log('📤 '+text.substring(0,30),'info');document.getElementById('msg-input').value='';renderAll();
+}
 
 // ========== WEB SOCKET ==========
-function connectWS(){if(PP4._ws&&PP4._ws.readyState===WebSocket.OPEN)return;try{PP4._ws=new WebSocket(PP4._wsUrl);}catch(e){setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);return;}PP4._ws.onopen=()=>{PP4._wsReconnectDelay=1000;updateStatus('online');document.getElementById('signal-tag').textContent='WS: онлайн';PP4._ws.send(JSON.stringify({action:'subscribe',peerId:PP4._peerId}));checkRequests();};PP4._ws.onmessage=async e=>{let m;try{m=JSON.parse(e.data);}catch(er){return;}if(m.type==='dht-signal'&&m.from!==DHT._nodeId){await handleSignal(m.from,m.data);return;}await handleMessage(m);};PP4._ws.onclose=()=>{updateStatus('offline');document.getElementById('signal-tag').textContent='WS: офлайн';setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);};}
-DHT._signalSend=(targetPeerId,data)=>{if(PP4._ws?.readyState===WebSocket.OPEN)PP4._ws.send(JSON.stringify({action:'dht-signal',targetPeerId,from:DHT._nodeId,data}));};
-
-async function handleMessage(msg){
-    if(msg.type==='blob'){
-        for(const[id,ch]of Object.entries(PP4._channels)){
-            if(!ch.secret)continue;
-            const u = await unpackBlob(msg.blob, ch);
-            if(!u) continue;
-            
-            ch.blobs.push({...u, from:'them'});
-            ch.expires = Date.now() + 600000;
-            
-            // Синхронизируем ratchet если нужно
-            if(u.ri && u.ri > (ch.ratchetIndex || 0)) {
-                ch.ratchetIndex = u.ri;
-                log(`🔄 Ratchet синхронизирован: ${u.ri}`,'warn');
-            }
-            
-            const displayText = u.d || u.text || JSON.stringify(u);
-            log(`📩 [${u.ri||'?'}] ${displayText.substring(0,30)}...`,'info');
-            renderAll();
-            return;
-        }
-    }
-    if(msg.type==='request'){PP4._requests.push({from:msg.from,tempKeyHash:msg.tempKeyHash,time:Date.now(),pubKey:msg.pubKey});log(`📞 Заявка: ${msg.from.substring(0,8)}...`,'info');renderAll();}
-    if(msg.type==='beacon-match'){const b=PP4._beacons[msg.beaconId];if(b&&b.keyPair){const chId=msg.channelId||RND();const ss=await deriveSecret(b.keyPair,await importPublicKey(msg.pubKey));PP4._channels[chId]={secret:ss,ratchetKey:ss,ratchetIndex:0,oldKeys:[],peerId:msg.peerId,type:'cup',blobs:[],expires:Date.now()+600000,createdAt:Date.now()};delete PP4._beacons[msg.beaconId];delete pendingDH[msg.beaconId];log('✅ Канал с Ratchet!','ok');connectToPeerDHT(msg.peerId).catch(()=>{});renderAll();}}
-    if(msg.type==='connect-ack'){const e=pendingDH[msg.requestId];if(e&&e.keyPair){const chId=msg.channelId||RND();const ss=await deriveSecret(e.keyPair,await importPublicKey(msg.pubKey));PP4._channels[chId]={secret:ss,ratchetKey:ss,ratchetIndex:0,oldKeys:[],peerId:msg.peerId,type:'cup',blobs:[],expires:Date.now()+600000,createdAt:Date.now()};delete pendingDH[msg.requestId];log('✅ Канал с Ratchet!','ok');connectToPeerDHT(msg.peerId).catch(()=>{});renderAll();}}
-    if(msg.type==='channel-closed'){if(PP4._channels[msg.channelId]){delete PP4._channels[msg.channelId];log('Канал закрыт','info');renderAll();}}
+function connectWS(){
+    if(PP4._ws&&PP4._ws.readyState===WebSocket.OPEN)return;
+    try{PP4._ws=new WebSocket(PP4._wsUrl);}catch(e){setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);return;}
+    PP4._ws.onopen=()=>{PP4._wsReconnectDelay=1000;updateStatus('online');document.getElementById('ws-tag').textContent='WS: онлайн';PP4._ws.send(JSON.stringify({action:'subscribe',peerId:PP4._peerId}));};
+    PP4._ws.onmessage=async e=>{let m;try{m=JSON.parse(e.data);}catch(er){return;}if(m.type==='blob'){handleIncomingBlob(m.blob,m.channelId);}};
+    PP4._ws.onclose=()=>{updateStatus('offline');document.getElementById('ws-tag').textContent='WS: офлайн';setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);};
 }
-
-async function createBeacon(){const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const tkh=await SHA(pk);const bid=RND();PP4._beacons[bid]={keyPair:kp,pubKey:pk,hash:tkh,expires:Date.now()+1800000,createdAt:Date.now()};pendingDH[bid]={keyPair:kp};if(PP4._ws)PP4._ws.send(JSON.stringify({action:'beacon',beaconId:bid,tempKeyHash:tkh,peerId:PP4._peerId,pubKey:pk}));log('🏹 Маяк создан.','ok');renderAll();}
-async function connectByPeerId(){const targetId=document.getElementById('target-peer-id').value.trim();if(!targetId){log('Введи Peer ID','err');return;}const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const tkh=await SHA(pk);const rid=RND();pendingDH[rid]={keyPair:kp};if(PP4._ws)PP4._ws.send(JSON.stringify({action:'connect',targetPeerId:targetId,tempKeyHash:tkh,fromPeerId:PP4._peerId,pubKey:pk,requestId:rid}));document.getElementById('connect-result').textContent='✅ Запрос отправлен.';log(`Запрос к ${targetId.substring(0,8)}...`,'info');}
-async function acceptRequest(i){const r=PP4._requests[i];if(!r)return;const kp=await generateKeyPair();const pk=await exportPublicKey(kp);if(PP4._ws)PP4._ws.send(JSON.stringify({action:'accept-request',fromPeerId:r.from,tempKeyHash:r.tempKeyHash,myPeerId:PP4._peerId,pubKey:pk}));PP4._requests.splice(i,1);renderAll();}
-function rejectRequest(i){PP4._requests.splice(i,1);renderAll();}
-function checkRequests(){if(PP4._ws)PP4._ws.send(JSON.stringify({action:'check-requests',peerId:PP4._peerId}));}
-
-async function sendBlob(){
-    const text = document.getElementById('blob-input').value.trim();
-    const chId = document.getElementById('channel-select').value;
-    if(!text||!chId)return;
-    const ch = PP4._channels[chId];
-    if(!ch||!ch.secret){log('Нет секрета канала','err');return;}
-    
-    const data = JSON.stringify({d: text});
-    const packed = await packBlob(data, ch);
-    
-    const dhtPeers = getClosestPeers(chId,3).filter(p=>p.conn?.readyState==='open');
-    if(dhtPeers.length>0){
-        for(const p of dhtPeers)await sendToPeer(p.id,{type:'blob',channelId:chId,blob:packed});
-    }else if(PP4._ws)PP4._ws.send(JSON.stringify({action:'blob',channelId:chId,blob:packed,peerId:PP4._peerId}));
-    
-    ch.blobs.push({d:text, t:Date.now(), n:RND(), from:'me', ri:ch.ratchetIndex||0});
-    ch.expires = Date.now() + 600000;
-    
-    log(`📤 [${ch.ratchetIndex||0}] ${text.substring(0,30)}...`,'info');
-    document.getElementById('blob-input').value='';
-    renderAll();
-    updateRatchetStats();
-}
-
-function dhtStoreUI(){const k=document.getElementById('dht-key').value.trim();const v=document.getElementById('dht-value').value.trim();if(!k||!v)return;const n=dhtStore(k,v,PP4._peerId);log(`💾 DHT: "${v}" → ${n} пиров`,'ok');updateStats();}
-async function dhtFindUI(){const k=document.getElementById('dht-key').value.trim();if(!k)return;const r=await dhtFindValue(k);document.getElementById('dht-find-result').textContent=r?`✅ ${r.value}`:'❌ Не найдено';}
 
 // ========== UI ==========
 function log(msg,type='info'){const box=document.getElementById('log-box');box.innerHTML+=`<div class="${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;box.scrollTop=box.scrollHeight;}
-function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':s==='offline'?'Офлайн':'Занят';}
-function updateStats(){document.getElementById('ch-count').textContent=Object.keys(PP4._channels).length;document.getElementById('store-count').textContent=Object.keys(DHT._storage).length;document.getElementById('dht-tag').textContent='DHT: '+DHT._peers.size;}
-function updateRatchetStats(){
-    let totalRotations = 0;
-    for(const ch of Object.values(PP4._channels)){
-        totalRotations += ch.ratchetIndex || 0;
-    }
-    document.getElementById('ratchet-stats').textContent = totalRotations + ' оборотов';
-}
+function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':'Офлайн';}
 function copyPeerId(){navigator.clipboard.writeText(PP4._peerId);log('Peer ID скопирован','ok');}
-function renderRoutingTable(){const t=document.getElementById('routing-table');const buckets=DHT._buckets.map((b,i)=>({idx:i,peers:b})).filter(b=>b.peers.length>0);t.innerHTML=buckets.map(b=>`<div class="card"><div class="card-header"><span class="card-title">Корзина ${b.idx}</span><span class="card-meta">${b.peers.length} пиров</span></div><div style="font-size:.6em;">${b.peers.map(p=>(Date.now()-p.lastSeen>120000?'<span class="dead">':'')+p.id.substring(0,6)+(Date.now()-p.lastSeen>120000?'</span>':'')).join(', ')}</div></div>`).join('')||'<div style="color:var(--dim);font-size:.7em;">Пусто</div>';}
 function renderAll(){
-    updateStats();renderRoutingTable();
-    document.getElementById('peer-id-display').textContent=PP4._peerId.substring(0,16)+'...';
-    document.getElementById('beacons-list').innerHTML=Object.entries(PP4._beacons).map(([id,b])=>`<div class="card"><div class="card-header"><span class="card-title">🏹 ${id.substring(0,6)}...</span><span class="card-meta">${Math.round((b.expires-Date.now())/60000)} мин</span></div></div>`).join('')||'<div style="color:var(--dim);font-size:.7em;">Нет маяков</div>';
-    document.getElementById('requests-list').innerHTML=PP4._requests.map((r,i)=>`<div class="card"><div class="card-header"><span class="card-title">📞 ${r.from.substring(0,8)}...</span><span class="card-meta">${Math.round((Date.now()-r.time)/60000)} мин</span></div><div class="row"><button class="accept" onclick="acceptRequest(${i})">✅</button><button class="danger" onclick="rejectRequest(${i})">❌</button></div></div>`).join('')||'<div style="color:var(--dim);font-size:.7em;">Нет заявок</div>';
+    document.getElementById('peer-id-display').textContent=PP4._peerId?.substring(0,16)+'...';
+    document.getElementById('ch-count').textContent=Object.keys(PP4._channels).length;
     const sel=document.getElementById('channel-select');sel.innerHTML='<option value="">Выбери канал...</option>';
     document.getElementById('channels-list').innerHTML=Object.entries(PP4._channels).map(([id,ch])=>{
-        sel.innerHTML+=`<option value="${id}">${id.substring(0,6)}... (${ch.blobs.length}) [R:${ch.ratchetIndex||0}]</option>`;
-        const securityTag = ch.ratchetIndex > 0 ? '<span class="secure-tag">🔒 Ratchet активен</span>' : '<span class="insecure-tag">⚠ Инициализация</span>';
-        return`<div class="card"><div class="card-header"><span class="card-title">💬 ${id.substring(0,6)}... ${securityTag}</span><span class="card-meta">${ch.type} | ${ch.blobs.length} блобов | ${Math.round((ch.expires-Date.now())/60000)} мин</span></div><div style="font-size:.65em;">Пир: ${ch.peerId?.substring(0,8)||'?'}... | Ratchet: ${ch.ratchetIndex||0} | Старых ключей: ${ch.oldKeys?.length||0}</div></div>`;
-    }).join('')||'<div style="color:var(--dim);font-size:.7em;">Нет каналов</div>';
+        sel.innerHTML+=`<option value="${id}">${id.substring(0,6)}... (${ch.blobs.length})</option>`;
+        return`<div class="card"><span class="card-title">💬 ${id.substring(0,6)}...</span> | Пир: ${ch.peerId?.substring(0,8)||'?'}... | Блобов: ${ch.blobs.length}</div>`;
+    }).join('')||'Нет каналов';
 }
 
-// ========== ЦИКЛ ==========
-setInterval(()=>{
-    const now=Date.now();
-    for(const[id,ch]of Object.entries(PP4._channels)){
-        if(now>ch.expires)delete PP4._channels[id];
-    }
-    for(const[id,b]of Object.entries(PP4._beacons)){
-        if(now>b.expires)delete PP4._beacons[id];
-    }
-    for(const[id]of Object.entries(pendingDH)){
-        if(!PP4._beacons[id]&&!PP4._channels[id])delete pendingDH[id];
-    }
-    PP4._requests=PP4._requests.filter(r=>now-r.time<1800000);
-    for(const[id,peer]of DHT._peers){
-        if(now-peer.lastSeen>30000&&peer.conn?.readyState==='open')
-            peer.conn.send(JSON.stringify({type:'dht-ping'}));
-        if(now-peer.lastSeen>120000){
-            DHT._peers.delete(id);
-            for(const bucket of DHT._buckets){
-                const idx=bucket.findIndex(p=>p.id===id);
-                if(idx>=0)bucket.splice(idx,1);
-            }
-        }
-    }
-    renderAll();
-},10000);
+setInterval(()=>{const now=Date.now();for(const[id,ch]of Object.entries(PP4._channels)){if(now>ch.expires)delete PP4._channels[id];}for(const[id,b]of Object.entries(PP4._beacons)){if(now>b.expires)delete PP4._beacons[id];}renderAll();},10000);
 
-// ========== ИНИТ ==========
 async function init(){
-    log('🕸️ P2PPong v5.0 — Слепой Улей + HMAC + Light Ratchet','info');
-    log('🔒 Безопасность: HMAC-SHA256 + Light Double Ratchet','ok');
-    log('📊 Каждое сообщение меняет ключ шифрования','info');
     PP4._peerId=await generateHardwarePeerId();
-    DHT._nodeId=PP4._peerId;
-    initBuckets();
-    connectWS();
-    renderAll();
-    log(`Peer ID: ${PP4._peerId.substring(0,12)}...`,'ok');
+    connectWS();renderAll();
+    log('P2PPong v5.0 готов','info');
 }
 init();
 </script>
