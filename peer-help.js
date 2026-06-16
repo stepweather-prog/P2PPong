@@ -1,5 +1,5 @@
 // webtorrent-peer-help.min.js — Гуманная P2P помощь сети для RobinHood P2P
-// Версия 1.0.1 (сохранена без изменений)
+// Версия 1.0.2 (сохранена без изменений)
 (function(){
 'use strict';
 if(!window.RTCPeerConnection&&!window.webkitRTCPeerConnection)return;
