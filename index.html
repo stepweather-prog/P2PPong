@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2PPong v5.0 — Слепой Улей</title>
+    <title>P2PPong v5.1 — Слепой Улей</title>
     <style>
         :root{--bg:#0a0a0a;--panel:#111;--accent:#c4a24b;--accent2:#e8d5a3;--text:#ccc;--dim:#888;--green:#4caf50;--red:#f44336;--orange:#ff9800}
         *{margin:0;padding:0;box-sizing:border-box}
@@ -14,11 +14,13 @@
         .dot{width:10px;height:10px;border-radius:50%}
         .dot.online{background:var(--green);box-shadow:0 0 8px var(--green)}
         .dot.offline{background:var(--red)}
+        .dot.waiting{background:var(--orange);animation:pulse .8s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
         .log{background:#000;border-radius:8px;padding:10px;max-height:300px;overflow-y:auto;font-size:.6em;color:var(--dim)}
-        .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--accent)}
+        .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--accent)}.log .warn{color:var(--orange)}
         button{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:rgba(196,162,75,.1);color:var(--accent);cursor:pointer;font-family:monospace;font-size:.75em;margin:3px}
         button:hover{background:rgba(196,162,75,.25)}
-        input{padding:8px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:var(--text);font-family:monospace;font-size:.75em;width:100%;margin:3px 0}
+        input,select{padding:8px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:var(--text);font-family:monospace;font-size:.75em;width:100%;margin:3px 0}
         .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
         .tag{font-size:.6em;padding:2px 8px;border-radius:4px;background:rgba(196,162,75,.1)}
         .card{background:rgba(255,255,255,.02);border:1px solid #333;border-radius:8px;padding:10px;margin:6px 0;font-size:.7em}
@@ -28,7 +30,7 @@
 <body>
 
 <div class="panel">
-    <h2>🕸️ P2PPong v5.0 — Слепой Улей</h2>
+    <h2>🕸️ P2PPong v5.1 — Слепой Улей</h2>
     <div class="status">
         <span class="dot" id="status-dot"></span>
         <span id="status-text">Инициализация...</span>
@@ -54,6 +56,7 @@
         <input type="text" id="peer-id-input" placeholder="Peer ID друга..." style="flex:1;">
         <button onclick="connectByPeerId()">🤝 Подключиться</button>
     </div>
+    <div id="connect-status" style="font-size:.7em;color:var(--orange);margin-top:4px;"></div>
 </div>
 
 <div class="panel">
@@ -78,7 +81,7 @@
 </div>
 
 <script>
-// ==================== P2PPong v5.0 — ЧИСТЫЙ СЛЕПОЙ УЛЕЙ ====================
+// ==================== P2PPong v5.1 — СЛЕПОЙ УЛЕЙ (СЕРВЕР ДО КОНЦА) ====================
 const PP4={_peerId:null,_beacons:{},_channels:{},_ws:null,_wsUrl:'wss://robincall.stephanclaps-491.workers.dev/ws',_wsReconnectDelay:1000,_maxReconnectDelay:30000};
 if(!window.crypto?.subtle)throw new Error('Требуется HTTPS');
 const RND=()=>{const a=new Uint32Array(4);crypto.getRandomValues(a);return[...a].map(x=>x.toString(16).padStart(8,'0')).join('');};
@@ -93,6 +96,7 @@ async function decryptAES(enc,secret){try{const k=await crypto.subtle.importKey(
 
 // ========== МАЯКИ ЧЕРЕЗ БЛОБЫ ==========
 const BLOB_NS='00000000000000000000000000000000';
+let waitingForResponse=null; // какой маяк ждёт ответа
 
 async function createBeacon(){
     const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const nonce=RND();const bid=RND();
@@ -102,7 +106,8 @@ async function createBeacon(){
     PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+1800000};
     broadcastBlob(JSON.stringify(beacon),BLOB_NS);
     document.getElementById('beacon-display').textContent='Твой Peer ID: '+PP4._peerId;
-    log('🏹 Маяк создан','ok');
+    log('🏹 Маяк создан. Ожидаю ответа...','info');
+    updateStatus('waiting');
 }
 
 async function connectByPeerId(){
@@ -114,31 +119,54 @@ async function connectByPeerId(){
     PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+300000};
     const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner,targetPeerId:targetId};
     broadcastBlob(JSON.stringify(beacon),BLOB_NS);
-    log('🤝 Запрос отправлен','info');
+    document.getElementById('connect-status').textContent='⏳ Ожидаю ответ...';
+    log('🤝 Запрос отправлен. Жду рукопожатия...','info');
+    updateStatus('waiting');
+    // Запоминаем что ждём ответа
+    waitingForResponse=bid;
 }
 
 async function handleIncomingBlob(blobData,channelId){
     let data;try{data=JSON.parse(blobData);}catch(e){return;}
+    
+    // Входящий маяк
     if(data.type==='beacon'&&data.pubKey&&data.inner){
         if(data.targetPeerId&&data.targetPeerId!==PP4._peerId)return;
+        log('📡 Получен маяк, создаю канал...','info');
         const remotePubKey=await importPublicKey(data.pubKey);const kp=await generateKeyPair();const myPubKey=await exportPublicKey(kp);
         const ss=await deriveSecret(kp,remotePubKey);const chId=RND();
         PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
+        // Отправляем ответ через сервер (НЕ закрываем его!)
         broadcastBlob(JSON.stringify({type:'beacon-response',pubKey:myPubKey,peerId:PP4._peerId,inner:data.inner}),BLOB_NS);
-        log('✅ Канал открыт!','ok');renderAll();return;
+        log('✅ Канал открыт! Ответ отправлен.','ok');
+        updateStatus('online');
+        renderAll();return;
     }
+    
+    // Ответ на наш маяк
     if(data.type==='beacon-response'&&data.pubKey&&data.inner){
         for(const[bid,b]of Object.entries(PP4._beacons)){
-            if(!b.beaconKey)continue;const dec=await decryptAES(data.inner,b.beaconKey);if(!dec)continue;
-            let payload;try{payload=JSON.parse(dec);}catch(e){continue;}if(payload.nonce!==b.nonce)continue;
+            if(!b.beaconKey)continue;
+            const dec=await decryptAES(data.inner,b.beaconKey);if(!dec)continue;
+            let payload;try{payload=JSON.parse(dec);}catch(e){continue;}
+            if(payload.nonce!==b.nonce)continue;
+            log('📡 Получен ответ на маяк!','info');
             const remotePubKey=await importPublicKey(data.pubKey);const ss=await deriveSecret(b.keyPair,remotePubKey);const chId=RND();
             PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
-            delete PP4._beacons[bid];log('✅ Канал открыт!','ok');renderAll();return;
+            delete PP4._beacons[bid];
+            document.getElementById('connect-status').textContent='';
+            waitingForResponse=null;
+            log('✅ Канал открыт! Общий ключ установлен.','ok');
+            updateStatus('online');
+            renderAll();return;
         }
     }
+    
+    // Обычное сообщение
     for(const[id,ch]of Object.entries(PP4._channels)){
-        if(!ch.secret)continue;const u=await decryptAES(blobData,ch.secret);if(!u)continue;
-        try{const msg=JSON.parse(u);ch.blobs.push({...msg,from:'them'});ch.expires=Date.now()+600000;
+        if(!ch.secret)continue;
+        const dec=await decryptAES(blobData,ch.secret);if(!dec)continue;
+        try{const msg=JSON.parse(dec);ch.blobs.push({...msg,from:'them'});ch.expires=Date.now()+600000;
         log('📩 '+((msg.d||'').substring(0,30)),'info');renderAll();return;}catch(e){}
     }
 }
@@ -160,7 +188,7 @@ async function sendMsg(){
     log('📤 '+text.substring(0,30),'info');document.getElementById('msg-input').value='';renderAll();
 }
 
-// ========== WEB SOCKET ==========
+// ========== WEB SOCKET (НЕ ЗАКРЫВАЕМ ПОСЛЕ СТЫКОВКИ) ==========
 function connectWS(){
     if(PP4._ws&&PP4._ws.readyState===WebSocket.OPEN)return;
     try{PP4._ws=new WebSocket(PP4._wsUrl);}catch(e){setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);return;}
@@ -171,7 +199,7 @@ function connectWS(){
 
 // ========== UI ==========
 function log(msg,type='info'){const box=document.getElementById('log-box');box.innerHTML+=`<div class="${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;box.scrollTop=box.scrollHeight;}
-function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':'Офлайн';}
+function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':s==='offline'?'Офлайн':s==='waiting'?'Ожидание':'Готов';}
 function copyPeerId(){navigator.clipboard.writeText(PP4._peerId);log('Peer ID скопирован','ok');}
 function renderAll(){
     document.getElementById('peer-id-display').textContent=PP4._peerId?.substring(0,16)+'...';
@@ -188,7 +216,7 @@ setInterval(()=>{const now=Date.now();for(const[id,ch]of Object.entries(PP4._cha
 async function init(){
     PP4._peerId=await generateHardwarePeerId();
     connectWS();renderAll();
-    log('P2PPong v5.0 готов','info');
+    log('P2PPong v5.1 готов — сервер остаётся после стыковки','info');
 }
 init();
 </script>
