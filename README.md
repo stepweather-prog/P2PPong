@@ -73,12 +73,12 @@ ECDH на кривой P-256. Каждая сторона генерирует e
 Ядро **не зависит от интерфейса**. Всё общение через события:
 
 ```javascript
-// Подписка
+Подписка
 P2PPong.on('message-received', (data) => { ... });
 P2PPong.on('channel-opened', (data) => { ... });
 P2PPong.on('beacon-received', (data) => { ... });
 
-// Отправка
+Отправка
 P2PPong.sendMessage(channelId, 'привет');
 P2PPong.createBeacon(targetPeerId, { nick: 'Алиса' });
 Фоновая P2P-помощь (PeerHelp)
@@ -115,3 +115,13 @@ MIT
 
 Ответственность
 Проект предоставляется «как есть» (AS IS), без каких-либо гарантий. Криптографические решения не прошли независимый аудит безопасности.
+---
+
+## Связанные проекты
+
+| Проект | Репозиторий | Описание |
+|--------|-------------|----------|
+| **RobinHood P2P** | [github.com/stepweather-prog/ROBINHOOD-P2P](https://github.com/stepweather-prog/ROBINHOOD-P2P) | Приложение-мессенджер на платформе P2PPong |
+| **Cloudflare Worker** | [worker.js](worker.js) | Сигнальный сервер WebSocket |
+| **Render Server** | [server.js](server.js) | Резервный сигнальный сервер HTTP |
+| **Спецификация протокола** | [PROTOCOL.md](PROTOCOL.md) | Криптография, рукопожатие, формат блобов |
