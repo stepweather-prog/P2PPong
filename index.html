@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>P2PPong v5.1 — Слепой Улей</title>
+    <title>P2PPong v5.2 — Слепой Улей</title>
     <style>
         :root{--bg:#0a0a0a;--panel:#111;--accent:#c4a24b;--accent2:#e8d5a3;--text:#ccc;--dim:#888;--green:#4caf50;--red:#f44336;--orange:#ff9800}
         *{margin:0;padding:0;box-sizing:border-box}
@@ -20,6 +20,8 @@
         .log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--accent)}.log .warn{color:var(--orange)}
         button{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:rgba(196,162,75,.1);color:var(--accent);cursor:pointer;font-family:monospace;font-size:.75em;margin:3px}
         button:hover{background:rgba(196,162,75,.25)}
+        button.accept{border-color:var(--green);color:var(--green)}
+        button.danger{border-color:var(--red);color:var(--red)}
         input,select{padding:8px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:var(--text);font-family:monospace;font-size:.75em;width:100%;margin:3px 0}
         .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
         .tag{font-size:.6em;padding:2px 8px;border-radius:4px;background:rgba(196,162,75,.1)}
@@ -30,7 +32,7 @@
 <body>
 
 <div class="panel">
-    <h2>🕸️ P2PPong v5.1 — Слепой Улей</h2>
+    <h2>🕸️ P2PPong v5.2 — Слепой Улей</h2>
     <div class="status">
         <span class="dot" id="status-dot"></span>
         <span id="status-text">Инициализация...</span>
@@ -45,18 +47,17 @@
 </div>
 
 <div class="panel">
-    <h2>📡 Маяк</h2>
-    <button onclick="createBeacon()">🏹 Создать маяк</button>
-    <div id="beacon-display" style="font-size:.7em;color:var(--accent);margin-top:8px;word-break:break-all;"></div>
+    <h2>📡 Создать маяк</h2>
+    <div class="row">
+        <input type="text" id="target-peer-id" placeholder="Peer ID друга..." style="flex:1;">
+        <button onclick="createBeacon()">🏹 Создать маяк</button>
+    </div>
+    <div id="beacon-status" style="font-size:.7em;color:var(--accent);margin-top:4px;"></div>
 </div>
 
 <div class="panel">
-    <h2>🔗 Подключиться</h2>
-    <div class="row">
-        <input type="text" id="peer-id-input" placeholder="Peer ID друга..." style="flex:1;">
-        <button onclick="connectByPeerId()">🤝 Подключиться</button>
-    </div>
-    <div id="connect-status" style="font-size:.7em;color:var(--orange);margin-top:4px;"></div>
+    <h2>📩 Входящие маяки</h2>
+    <div id="incoming-beacons"></div>
 </div>
 
 <div class="panel">
@@ -81,7 +82,7 @@
 </div>
 
 <script>
-// ==================== P2PPong v5.1 — СЛЕПОЙ УЛЕЙ (СЕРВЕР ДО КОНЦА) ====================
+// ==================== P2PPong v5.2 — СЛЕПОЙ УЛЕЙ ====================
 const PP4={_peerId:null,_beacons:{},_channels:{},_ws:null,_wsUrl:'wss://robincall.stephanclaps-491.workers.dev/ws',_wsReconnectDelay:1000,_maxReconnectDelay:30000};
 if(!window.crypto?.subtle)throw new Error('Требуется HTTPS');
 const RND=()=>{const a=new Uint32Array(4);crypto.getRandomValues(a);return[...a].map(x=>x.toString(16).padStart(8,'0')).join('');};
@@ -94,36 +95,40 @@ async function deriveSecret(kp,remotePubKey){const b=await crypto.subtle.deriveB
 async function encryptAES(text,secret){const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret.substring(0,32)),{name:'AES-GCM'},false,['encrypt']);const iv=crypto.getRandomValues(new Uint8Array(12));const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},k,new TextEncoder().encode(text));const c=new Uint8Array(iv.length+new Uint8Array(ct).length);c.set(iv);c.set(new Uint8Array(ct),iv.length);return btoa(String.fromCharCode(...c));}
 async function decryptAES(enc,secret){try{const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(secret.substring(0,32)),{name:'AES-GCM'},false,['decrypt']);const c=Uint8Array.from(atob(enc),x=>x.charCodeAt(0));return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:c.slice(0,12)},k,c.slice(12)));}catch(e){return null;}}
 
-// ========== МАЯКИ ЧЕРЕЗ БЛОБЫ ==========
 const BLOB_NS='00000000000000000000000000000000';
-let waitingForResponse=null; // какой маяк ждёт ответа
+let incomingBeacons=[]; // входящие маяки (только для UI)
 
 async function createBeacon(){
+    const targetId=document.getElementById('target-peer-id').value.trim();
+    if(!targetId){log('Введи Peer ID друга','err');return;}
     const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const nonce=RND();const bid=RND();
     const beaconKey=await SHA(nonce+'beacon');
     const inner=await encryptAES(JSON.stringify({nonce:nonce,timestamp:Date.now(),peerId:PP4._peerId}),beaconKey);
-    const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner};
-    PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+1800000};
+    const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner,targetPeerId:targetId};
+    PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+300000};
     broadcastBlob(JSON.stringify(beacon),BLOB_NS);
-    document.getElementById('beacon-display').textContent='Твой Peer ID: '+PP4._peerId;
-    log('🏹 Маяк создан. Ожидаю ответа...','info');
-    updateStatus('waiting');
+    document.getElementById('beacon-status').textContent='⏳ Маяк отправлен. Ожидаю ответа...';
+    log('🏹 Маяк отправлен для '+targetId.substring(0,8)+'...','info');
 }
 
-async function connectByPeerId(){
-    const targetId=document.getElementById('peer-id-input').value.trim();
-    if(!targetId){log('Введи Peer ID','err');return;}
-    const kp=await generateKeyPair();const pk=await exportPublicKey(kp);const nonce=RND();const bid=RND();
-    const beaconKey=await SHA(nonce+'beacon');
-    const inner=await encryptAES(JSON.stringify({nonce:nonce,timestamp:Date.now(),peerId:PP4._peerId}),beaconKey);
-    PP4._beacons[bid]={keyPair:kp,pubKey:pk,nonce:nonce,beaconKey:beaconKey,expires:Date.now()+300000};
-    const beacon={type:'beacon',pubKey:pk,peerId:PP4._peerId,inner:inner,targetPeerId:targetId};
-    broadcastBlob(JSON.stringify(beacon),BLOB_NS);
-    document.getElementById('connect-status').textContent='⏳ Ожидаю ответ...';
-    log('🤝 Запрос отправлен. Жду рукопожатия...','info');
-    updateStatus('waiting');
-    // Запоминаем что ждём ответа
-    waitingForResponse=bid;
+async function acceptBeacon(index){
+    const beacon=incomingBeacons[index];
+    if(!beacon)return;
+    const data=beacon.data;
+    const remotePubKey=await importPublicKey(data.pubKey);const kp=await generateKeyPair();const myPubKey=await exportPublicKey(kp);
+    const ss=await deriveSecret(kp,remotePubKey);const chId=RND();
+    PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
+    broadcastBlob(JSON.stringify({type:'beacon-response',pubKey:myPubKey,peerId:PP4._peerId,inner:data.inner}),BLOB_NS);
+    incomingBeacons.splice(index,1);
+    document.getElementById('beacon-status').textContent='';
+    log('✅ Принято! Канал открыт.','ok');
+    renderAll();
+}
+
+function rejectBeacon(index){
+    incomingBeacons.splice(index,1);
+    log('❌ Маяк отклонён','info');
+    renderAll();
 }
 
 async function handleIncomingBlob(blobData,channelId){
@@ -132,14 +137,8 @@ async function handleIncomingBlob(blobData,channelId){
     // Входящий маяк
     if(data.type==='beacon'&&data.pubKey&&data.inner){
         if(data.targetPeerId&&data.targetPeerId!==PP4._peerId)return;
-        log('📡 Получен маяк, создаю канал...','info');
-        const remotePubKey=await importPublicKey(data.pubKey);const kp=await generateKeyPair();const myPubKey=await exportPublicKey(kp);
-        const ss=await deriveSecret(kp,remotePubKey);const chId=RND();
-        PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
-        // Отправляем ответ через сервер (НЕ закрываем его!)
-        broadcastBlob(JSON.stringify({type:'beacon-response',pubKey:myPubKey,peerId:PP4._peerId,inner:data.inner}),BLOB_NS);
-        log('✅ Канал открыт! Ответ отправлен.','ok');
-        updateStatus('online');
+        log('📡 Входящий маяк от '+data.peerId.substring(0,8)+'...','info');
+        incomingBeacons.push({data,time:Date.now()});
         renderAll();return;
     }
     
@@ -150,14 +149,11 @@ async function handleIncomingBlob(blobData,channelId){
             const dec=await decryptAES(data.inner,b.beaconKey);if(!dec)continue;
             let payload;try{payload=JSON.parse(dec);}catch(e){continue;}
             if(payload.nonce!==b.nonce)continue;
-            log('📡 Получен ответ на маяк!','info');
             const remotePubKey=await importPublicKey(data.pubKey);const ss=await deriveSecret(b.keyPair,remotePubKey);const chId=RND();
             PP4._channels[chId]={secret:ss,peerId:data.peerId,type:'cup',blobs:[],expires:Date.now()+600000};
             delete PP4._beacons[bid];
-            document.getElementById('connect-status').textContent='';
-            waitingForResponse=null;
-            log('✅ Канал открыт! Общий ключ установлен.','ok');
-            updateStatus('online');
+            document.getElementById('beacon-status').textContent='✅ Подключено!';
+            log('✅ Канал открыт!','ok');
             renderAll();return;
         }
     }
@@ -188,7 +184,6 @@ async function sendMsg(){
     log('📤 '+text.substring(0,30),'info');document.getElementById('msg-input').value='';renderAll();
 }
 
-// ========== WEB SOCKET (НЕ ЗАКРЫВАЕМ ПОСЛЕ СТЫКОВКИ) ==========
 function connectWS(){
     if(PP4._ws&&PP4._ws.readyState===WebSocket.OPEN)return;
     try{PP4._ws=new WebSocket(PP4._wsUrl);}catch(e){setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);return;}
@@ -197,13 +192,23 @@ function connectWS(){
     PP4._ws.onclose=()=>{updateStatus('offline');document.getElementById('ws-tag').textContent='WS: офлайн';setTimeout(connectWS,PP4._wsReconnectDelay);PP4._wsReconnectDelay=Math.min(PP4._wsReconnectDelay*2,PP4._maxReconnectDelay);};
 }
 
-// ========== UI ==========
 function log(msg,type='info'){const box=document.getElementById('log-box');box.innerHTML+=`<div class="${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;box.scrollTop=box.scrollHeight;}
-function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':s==='offline'?'Офлайн':s==='waiting'?'Ожидание':'Готов';}
+function updateStatus(s){const dot=document.getElementById('status-dot');dot.className='dot '+s;document.getElementById('status-text').textContent=s==='online'?'Онлайн':'Офлайн';}
 function copyPeerId(){navigator.clipboard.writeText(PP4._peerId);log('Peer ID скопирован','ok');}
 function renderAll(){
     document.getElementById('peer-id-display').textContent=PP4._peerId?.substring(0,16)+'...';
     document.getElementById('ch-count').textContent=Object.keys(PP4._channels).length;
+    // Входящие маяки
+    document.getElementById('incoming-beacons').innerHTML=incomingBeacons.map((b,i)=>`
+        <div class="card">
+            <span class="card-title">📡 Маяк от ${b.data.peerId.substring(0,8)}...</span>
+            <div class="row" style="margin-top:6px;">
+                <button class="accept" onclick="acceptBeacon(${i})">✅ Принять</button>
+                <button class="danger" onclick="rejectBeacon(${i})">❌ Отклонить</button>
+            </div>
+        </div>
+    `).join('')||'Нет входящих маяков';
+    // Каналы
     const sel=document.getElementById('channel-select');sel.innerHTML='<option value="">Выбери канал...</option>';
     document.getElementById('channels-list').innerHTML=Object.entries(PP4._channels).map(([id,ch])=>{
         sel.innerHTML+=`<option value="${id}">${id.substring(0,6)}... (${ch.blobs.length})</option>`;
@@ -211,12 +216,12 @@ function renderAll(){
     }).join('')||'Нет каналов';
 }
 
-setInterval(()=>{const now=Date.now();for(const[id,ch]of Object.entries(PP4._channels)){if(now>ch.expires)delete PP4._channels[id];}for(const[id,b]of Object.entries(PP4._beacons)){if(now>b.expires)delete PP4._beacons[id];}renderAll();},10000);
+setInterval(()=>{const now=Date.now();for(const[id,ch]of Object.entries(PP4._channels)){if(now>ch.expires)delete PP4._channels[id];}for(const[id,b]of Object.entries(PP4._beacons)){if(now>b.expires)delete PP4._beacons[id];}incomingBeacons=incomingBeacons.filter(b=>now-b.time<300000);renderAll();},10000);
 
 async function init(){
     PP4._peerId=await generateHardwarePeerId();
     connectWS();renderAll();
-    log('P2PPong v5.1 готов — сервер остаётся после стыковки','info');
+    log('P2PPong v5.2 — вставь Peer ID друга и создай маяк','info');
 }
 init();
 </script>
