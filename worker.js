@@ -1,5 +1,5 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Использует ctx.storage для персистентного хранения маяков
+// ctx.storage для персистентного хранения + HPKP/Expect-CT
 
 var HiveRoom = class {
     constructor(state, env) {
@@ -9,11 +9,21 @@ var HiveRoom = class {
     async fetch(request) {
         const url = new URL(request.url);
 
+        // Базовые заголовки безопасности
+        const securityHeaders = {
+            'Access-Control-Allow-Origin': '*',
+            'Public-Key-Pins': 'pin-sha256="X3pGTSOuJeEVw989IJ/cEtXUEmy52zs1TZQrU06KUKg="; max-age=2592000; includeSubDomains',
+            'Expect-CT': 'max-age=86400, enforce',
+            'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+            'X-Content-Type-Options': 'nosniff',
+            'X-Frame-Options': 'DENY'
+        };
+
         if (request.method === 'OPTIONS') {
             return new Response(null, {
                 status: 204,
                 headers: {
-                    'Access-Control-Allow-Origin': '*',
+                    ...securityHeaders,
                     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Max-Age': '86400'
@@ -27,7 +37,7 @@ var HiveRoom = class {
             try { body = await request.json(); } catch(e) {
                 return new Response(JSON.stringify({ error: 'invalid_json' }), {
                     status: 400,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
 
@@ -35,7 +45,7 @@ var HiveRoom = class {
             if (!keyHash || !packet) {
                 return new Response(JSON.stringify({ error: 'missing_params' }), {
                     status: 400,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
 
@@ -45,7 +55,7 @@ var HiveRoom = class {
                 taken: false
             });
 
-            // Чистим просроченные
+            // Чистим просроченные (старше 150 секунд)
             const all = await this.ctx.storage.list();
             const now = Date.now();
             for (const [key, val] of all) {
@@ -55,7 +65,7 @@ var HiveRoom = class {
             }
 
             return new Response(JSON.stringify({ status: 'stored' }), {
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
         }
 
@@ -65,7 +75,7 @@ var HiveRoom = class {
             if (!keyHash) {
                 return new Response(JSON.stringify({ error: 'missing_key' }), {
                     status: 400,
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
 
@@ -73,13 +83,13 @@ var HiveRoom = class {
 
             if (!entry) {
                 return new Response(JSON.stringify({ status: 'empty' }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
 
             if (entry.taken) {
                 return new Response(JSON.stringify({ status: 'taken' }), {
-                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
 
@@ -88,7 +98,7 @@ var HiveRoom = class {
             await this.ctx.storage.put(keyHash, entry);
 
             return new Response(JSON.stringify({ status: 'found', packet: entry.packet }), {
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
         }
 
@@ -100,13 +110,13 @@ var HiveRoom = class {
                 lockers: all.size,
                 timestamp: Date.now()
             }), {
-                headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
         }
 
         return new Response("P2PPong Blind Locker", {
             status: 200,
-            headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' }
+            headers: { ...securityHeaders, 'Content-Type': 'text/plain' }
         });
     }
 };
