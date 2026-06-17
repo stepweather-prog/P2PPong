@@ -1,10 +1,9 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Сервер не знает: кто положил, кто забрал, что внутри.
-// Только номер ячейки и зашифрованный пакет.
+// Использует ctx.storage для персистентного хранения маяков
 
 var HiveRoom = class {
     constructor(state, env) {
-        this.lockers = new Map(); // keyHash → { packet, createdAt, taken }
+        this.ctx = state;
     }
 
     async fetch(request) {
@@ -40,15 +39,19 @@ var HiveRoom = class {
                 });
             }
 
-            this.lockers.set(keyHash, {
+            await this.ctx.storage.put(keyHash, {
                 packet,
                 createdAt: Date.now(),
                 taken: false
             });
 
+            // Чистим просроченные
+            const all = await this.ctx.storage.list();
             const now = Date.now();
-            for (const [key, val] of this.lockers) {
-                if (now - val.createdAt > 150000) this.lockers.delete(key);
+            for (const [key, val] of all) {
+                if (now - val.createdAt > 150000) {
+                    await this.ctx.storage.delete(key);
+                }
             }
 
             return new Response(JSON.stringify({ status: 'stored' }), {
@@ -66,8 +69,8 @@ var HiveRoom = class {
                 });
             }
 
-            const entry = this.lockers.get(keyHash);
-            
+            const entry = await this.ctx.storage.get(keyHash);
+
             if (!entry) {
                 return new Response(JSON.stringify({ status: 'empty' }), {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
@@ -80,9 +83,10 @@ var HiveRoom = class {
                 });
             }
 
-            // Отдаём маяк но НЕ удаляем ячейку — помечаем как забранную
+            // Помечаем как забранное, но НЕ удаляем
             entry.taken = true;
-            
+            await this.ctx.storage.put(keyHash, entry);
+
             return new Response(JSON.stringify({ status: 'found', packet: entry.packet }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
@@ -90,9 +94,10 @@ var HiveRoom = class {
 
         // ==================== ЗДОРОВЬЕ ====================
         if (url.pathname === '/health') {
+            const all = await this.ctx.storage.list();
             return new Response(JSON.stringify({
                 status: 'ok',
-                lockers: this.lockers.size,
+                lockers: all.size,
                 timestamp: Date.now()
             }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
