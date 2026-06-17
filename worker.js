@@ -4,13 +4,12 @@
 
 var HiveRoom = class {
     constructor(state, env) {
-        this.lockers = new Map(); // keyHash → { packet, createdAt }
+        this.lockers = new Map(); // keyHash → { packet, createdAt, taken }
     }
 
     async fetch(request) {
         const url = new URL(request.url);
 
-        // CORS
         if (request.method === 'OPTIONS') {
             return new Response(null, {
                 status: 204,
@@ -43,13 +42,13 @@ var HiveRoom = class {
 
             this.lockers.set(keyHash, {
                 packet,
-                createdAt: Date.now()
+                createdAt: Date.now(),
+                taken: false
             });
 
-            // Чистим просроченные (старше 60 секунд)
             const now = Date.now();
             for (const [key, val] of this.lockers) {
-                if (now - val.createdAt > 60000) this.lockers.delete(key);
+                if (now - val.createdAt > 150000) this.lockers.delete(key);
             }
 
             return new Response(JSON.stringify({ status: 'stored' }), {
@@ -68,15 +67,22 @@ var HiveRoom = class {
             }
 
             const entry = this.lockers.get(keyHash);
+            
             if (!entry) {
                 return new Response(JSON.stringify({ status: 'empty' }), {
                     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
                 });
             }
 
-            // Отдаём и удаляем
-            this.lockers.delete(keyHash);
+            if (entry.taken) {
+                return new Response(JSON.stringify({ status: 'taken' }), {
+                    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+                });
+            }
 
+            // Отдаём маяк но НЕ удаляем ячейку — помечаем как забранную
+            entry.taken = true;
+            
             return new Response(JSON.stringify({ status: 'found', packet: entry.packet }), {
                 headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
             });
