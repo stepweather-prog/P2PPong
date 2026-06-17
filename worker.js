@@ -1,19 +1,17 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// ctx.storage для персистентного хранения + HPKP/Expect-CT
+// Правильный конструктор и ctx.storage
 
 var HiveRoom = class {
-    constructor(state, env) {
-        this.ctx = state;
+    constructor(ctx, env) {
+        this.ctx = ctx;
+        this.env = env;
     }
 
     async fetch(request) {
         const url = new URL(request.url);
 
-        // Базовые заголовки безопасности
         const securityHeaders = {
             'Access-Control-Allow-Origin': '*',
-            'Public-Key-Pins': 'pin-sha256="X3pGTSOuJeEVw989IJ/cEtXUEmy52zs1TZQrU06KUKg="; max-age=2592000; includeSubDomains',
-            'Expect-CT': 'max-age=86400, enforce',
             'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
             'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY'
@@ -31,7 +29,6 @@ var HiveRoom = class {
             });
         }
 
-        // ==================== ПОЛОЖИТЬ В ЯЧЕЙКУ ====================
         if (request.method === 'POST' && url.pathname === '/beacon') {
             let body;
             try { body = await request.json(); } catch(e) {
@@ -55,7 +52,6 @@ var HiveRoom = class {
                 taken: false
             });
 
-            // Чистим просроченные (старше 150 секунд)
             const all = await this.ctx.storage.list();
             const now = Date.now();
             for (const [key, val] of all) {
@@ -69,7 +65,6 @@ var HiveRoom = class {
             });
         }
 
-        // ==================== ЗАБРАТЬ ИЗ ЯЧЕЙКИ ====================
         if (request.method === 'GET' && url.pathname === '/beacon') {
             const keyHash = url.searchParams.get('key');
             if (!keyHash) {
@@ -93,7 +88,6 @@ var HiveRoom = class {
                 });
             }
 
-            // Помечаем как забранное, но НЕ удаляем
             entry.taken = true;
             await this.ctx.storage.put(keyHash, entry);
 
@@ -102,7 +96,6 @@ var HiveRoom = class {
             });
         }
 
-        // ==================== ЗДОРОВЬЕ ====================
         if (url.pathname === '/health') {
             const all = await this.ctx.storage.list();
             return new Response(JSON.stringify({
