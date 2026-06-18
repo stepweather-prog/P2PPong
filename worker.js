@@ -1,5 +1,5 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Финальная версия
+// Финальная версия — многоразовые маяки, защита от мусора, метрики
 
 var HiveRoom = class {
     constructor(ctx, env) {
@@ -9,8 +9,8 @@ var HiveRoom = class {
             'waiting_': 300000,
             'emoji_': 300000,
             'ack_': 300000,
-            'msg_': 60000,
-            'webrtc_': 60000
+            'msg_': 120000,
+            'webrtc_': 120000
         };
     }
 
@@ -29,7 +29,7 @@ var HiveRoom = class {
                 status: 204,
                 headers: {
                     ...securityHeaders,
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Max-Age': '86400'
                 }
@@ -48,6 +48,13 @@ var HiveRoom = class {
             const { keyHash, packet } = body;
             if (!keyHash || !packet) {
                 return new Response(JSON.stringify({ error: 'missing_params' }), {
+                    status: 400,
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+
+            if (keyHash.length > 128 || packet.length > 8192) {
+                return new Response(JSON.stringify({ error: 'too_large' }), {
                     status: 400,
                     headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
@@ -101,26 +108,22 @@ var HiveRoom = class {
                 });
             }
 
-            entry.taken = true;
-            await this.ctx.storage.put(keyHash, entry);
+            // Маяки НЕ помечаются как taken — они многоразовые
+            const prefix = keyHash.split('_')[0] + '_';
+            if (prefix === 'waiting_' || prefix === 'emoji_' || prefix === 'ack_') {
+                // Не ставим taken — маяк доступен многократно в течение TTL
+            } else {
+                // msg_ и webrtc_ остаются одноразовыми
+                entry.taken = true;
+                await this.ctx.storage.put(keyHash, entry);
+            }
 
             return new Response(JSON.stringify({ status: 'found', packet: entry.packet }), {
                 headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
         }
 
-        if (url.pathname === '/health') {
-            const all = await this.ctx.storage.list();
-            return new Response(JSON.stringify({
-                status: 'ok',
-                lockers: all.size,
-                timestamp: Date.now()
-            }), {
-                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
-            });
-        }
-
-        if (url.pathname === '/delete') {
+        if (request.method === 'DELETE' && url.pathname === '/beacon') {
             const keyHash = url.searchParams.get('key');
             if (keyHash) {
                 await this.ctx.storage.delete(keyHash);
@@ -128,6 +131,31 @@ var HiveRoom = class {
                     headers: { ...securityHeaders, 'Content-Type': 'application/json' }
                 });
             }
+            return new Response(JSON.stringify({ error: 'missing_key' }), {
+                status: 400,
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (url.pathname === '/health') {
+            const all = await this.ctx.storage.list();
+            const now = Date.now();
+            let waiting = 0, emoji = 0, ack = 0, msg = 0, webrtc = 0;
+            for (const [key, entry] of all) {
+                if (key.startsWith('waiting_')) waiting++;
+                else if (key.startsWith('emoji_')) emoji++;
+                else if (key.startsWith('ack_')) ack++;
+                else if (key.startsWith('msg_')) msg++;
+                else if (key.startsWith('webrtc_')) webrtc++;
+            }
+            return new Response(JSON.stringify({
+                status: 'ok',
+                lockers: all.size,
+                breakdown: { waiting, emoji, ack, msg, webrtc },
+                timestamp: now
+            }), {
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+            });
         }
 
         return new Response("P2PPong Blind Locker", {
