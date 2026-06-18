@@ -1,10 +1,17 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Правильный конструктор и ctx.storage
+// Финальная версия
 
 var HiveRoom = class {
     constructor(ctx, env) {
         this.ctx = ctx;
         this.env = env;
+        this.TTL_MAP = {
+            'waiting_': 300000,
+            'emoji_': 300000,
+            'ack_': 300000,
+            'msg_': 60000,
+            'webrtc_': 60000
+        };
     }
 
     async fetch(request) {
@@ -46,16 +53,22 @@ var HiveRoom = class {
                 });
             }
 
+            const prefix = keyHash.split('_')[0] + '_';
+            const ttl = this.TTL_MAP[prefix] || 150000;
+
             await this.ctx.storage.put(keyHash, {
                 packet,
                 createdAt: Date.now(),
                 taken: false
-            });
+            }, { expirationTtl: ttl / 1000 });
 
             const all = await this.ctx.storage.list();
-            const now = Date.now();
-            for (const [key, val] of all) {
-                if (now - val.createdAt > 150000) {
+            if (all.size > 500) {
+                const now = Date.now();
+                const sorted = [...all.entries()]
+                    .sort((a, b) => a[1].createdAt - b[1].createdAt);
+                const toDelete = sorted.slice(0, sorted.length - 500);
+                for (const [key] of toDelete) {
                     await this.ctx.storage.delete(key);
                 }
             }
@@ -105,6 +118,16 @@ var HiveRoom = class {
             }), {
                 headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
+        }
+
+        if (url.pathname === '/delete') {
+            const keyHash = url.searchParams.get('key');
+            if (keyHash) {
+                await this.ctx.storage.delete(keyHash);
+                return new Response(JSON.stringify({ status: 'deleted' }), {
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
         }
 
         return new Response("P2PPong Blind Locker", {
