@@ -1,54 +1,49 @@
-// server.js — P2PPong Render Server (Финальный)
-// Персистентность через JSON-файл
+// server.js — P2PPong Render Server (Финал)
+// TTL = 300с, debounced persist, gracefull shutdown
 
 const http = require('http');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
 const PORT = process.env.PORT || 10000;
-const SESSION_TTL = 30 * 60 * 1000;
-const MAX_SESSIONS = 50;
+const LOCKER_TTL = 300 * 1000;
+const MAX_LOCKERS = 500;
 const CLEANUP_INTERVAL = 30 * 1000;
-const BEACON_TTL = 20 * 60 * 1000;
-const LOCKER_TTL = 150 * 1000;
-const MAX_MESSAGE_SIZE = 1024 * 10;
+const PERSIST_INTERVAL = 10000;
 const PERSIST_FILE = path.join(__dirname, 'lockers.json');
 
-let sessions = {};
-let beacons = {};
 let lockers = {};
+let persistTimer = null;
+let dirty = false;
 const rateLimit = {};
 
-// Загрузка персистентных данных
 try {
     if (fs.existsSync(PERSIST_FILE)) {
         const raw = fs.readFileSync(PERSIST_FILE, 'utf8');
         const data = JSON.parse(raw);
         lockers = data.lockers || {};
-        beacons = data.beacons || {};
-        console.log('📦 Загружено ячеек:', Object.keys(lockers).length);
+        console.log('Загружено ячеек:', Object.keys(lockers).length);
     }
 } catch(e) {
     console.error('Ошибка загрузки:', e.message);
 }
 
-// Сохранение персистентных данных
 function persistData() {
+    if (!dirty) return;
+    dirty = false;
     try {
-        const data = {
-            lockers,
-            beacons,
-            savedAt: Date.now()
-        };
+        const data = { lockers, savedAt: Date.now() };
         fs.writeFileSync(PERSIST_FILE + '.tmp', JSON.stringify(data));
         fs.renameSync(PERSIST_FILE + '.tmp', PERSIST_FILE);
-    } catch(e) {
-        console.error('Ошибка сохранения:', e.message);
-    }
+    } catch(e) {}
 }
 
-function generateSessionId() { return crypto.randomBytes(16).toString('hex'); }
+function markDirty() {
+    dirty = true;
+    if (!persistTimer) {
+        persistTimer = setTimeout(() => { persistData(); persistTimer = null; }, PERSIST_INTERVAL);
+    }
+}
 
 function checkRateLimit(ip) {
     const now = Date.now();
@@ -62,18 +57,6 @@ function checkRateLimit(ip) {
 function cleanupAll() {
     const now = Date.now();
     let changed = false;
-    
-    for (const id of Object.keys(beacons)) {
-        if ((now - beacons[id].createdAt) > BEACON_TTL) {
-            delete beacons[id];
-            changed = true;
-        }
-    }
-    for (const id of Object.keys(sessions)) {
-        if ((now - sessions[id].createdAt) > SESSION_TTL) {
-            delete sessions[id];
-        }
-    }
     for (const id of Object.keys(lockers)) {
         if ((now - lockers[id].createdAt) > LOCKER_TTL) {
             delete lockers[id];
@@ -84,8 +67,7 @@ function cleanupAll() {
         rateLimit[ip] = rateLimit[ip].filter(t => now - t < 60000);
         if (rateLimit[ip].length === 0) delete rateLimit[ip];
     }
-    
-    if (changed) persistData();
+    if (changed) markDirty();
 }
 
 const securityHeaders = {
@@ -125,7 +107,7 @@ const server = http.createServer((req, res) => {
     }
 
     const url = new URL(req.url, `http://${req.headers.host}`);
-    const path = url.pathname;
+    const pathname = url.pathname;
     const params = url.searchParams;
 
     let body = '';
@@ -143,100 +125,63 @@ const server = http.createServer((req, res) => {
             catch(e) { sendJson(res, 400, { error: 'invalid_json' }); return; }
         }
 
-        // Слепая ячейка
-        if (req.method === 'POST' && path === '/beacon') {
+        if (req.method === 'POST' && pathname === '/beacon') {
             const keyHash = p.keyHash;
             const packet = p.packet;
-            if (keyHash && packet) {
-                if (lockers[keyHash] && lockers[keyHash].taken) {
-                    sendJson(res, 200, { status: 'taken' });
-                    return;
-                }
-                lockers[keyHash] = { packet, createdAt: Date.now(), taken: false };
-                persistData();
-                sendJson(res, 200, { status: 'stored' });
+            if (!keyHash || !packet) {
+                sendJson(res, 400, { error: 'missing_params' });
                 return;
             }
-
-            // Старая логика
-            const keyToStore = p.tempKeyHash || '';
-            const publicId = p.publicId || '';
-            if (!keyToStore) { sendJson(res, 400, { error: 'missing_tempKeyHash' }); return; }
-            const sid = generateSessionId();
-            beacons[sid] = { key: keyToStore, sessionId: sid, createdAt: Date.now(), matched: false, peerId: publicId };
-            sessions[sid] = { createdAt: Date.now(), messages: [] };
-            sendJson(res, 200, { sessionId: sid });
+            if (keyHash.length > 128 || packet.length > 8192) {
+                sendJson(res, 400, { error: 'too_large' });
+                return;
+            }
+            const keys = Object.keys(lockers);
+            if (keys.length >= MAX_LOCKERS) {
+                const sorted = keys.sort((a, b) => lockers[a].createdAt - lockers[b].createdAt);
+                const toDelete = sorted.slice(0, sorted.length - MAX_LOCKERS + 1);
+                for (const key of toDelete) delete lockers[key];
+            }
+            lockers[keyHash] = { packet, createdAt: Date.now(), taken: false };
+            markDirty();
+            sendJson(res, 200, { status: 'stored' });
             return;
         }
 
-        if (req.method === 'GET' && path === '/beacon') {
+        if (req.method === 'GET' && pathname === '/beacon') {
             const key = params.get('key');
-            if (key) {
-                const entry = lockers[key];
-                if (!entry) { sendJson(res, 200, { status: 'empty' }); return; }
-                if (entry.taken) { sendJson(res, 200, { status: 'taken' }); return; }
+            if (!key) { sendJson(res, 400, { error: 'missing_key' }); return; }
+            const entry = lockers[key];
+            if (!entry) { sendJson(res, 200, { status: 'empty' }); return; }
+            if (entry.taken) { sendJson(res, 200, { status: 'taken' }); return; }
+            if (key.startsWith('msg_') || key.startsWith('webrtc_')) {
                 entry.taken = true;
-                persistData();
-                sendJson(res, 200, { status: 'found', packet: entry.packet });
-                return;
+                markDirty();
             }
-            const id = params.get('id');
-            const b = beacons[id];
-            sendJson(res, 200, { matched: b ? b.matched : false, sessionId: id });
+            sendJson(res, 200, { status: 'found', packet: entry.packet });
             return;
         }
 
-        if (req.method === 'POST' && path === '/find') {
-            const searchKey = p.tempKeyHash || '';
-            const searchPeer = p.publicId || '';
-            if (!searchKey) { sendJson(res, 400, { error: 'missing_tempKeyHash' }); return; }
-            let found = null;
-            for (const id of Object.keys(beacons)) {
-                if (beacons[id].key === searchKey && !beacons[id].matched && beacons[id].peerId === searchPeer) {
-                    beacons[id].matched = true;
-                    found = beacons[id];
-                    break;
-                }
-            }
-            if (found) {
-                if (!sessions[found.sessionId]) sessions[found.sessionId] = { createdAt: Date.now(), messages: [] };
-                sendJson(res, 200, { sessionId: found.sessionId, status: 'matched' });
-            } else {
-                sendJson(res, 200, { status: 'waiting' });
-            }
+        if (pathname === '/delete') {
+            const key = params.get('key');
+            if (key) { delete lockers[key]; markDirty(); sendJson(res, 200, { status: 'deleted' }); return; }
+            sendJson(res, 400, { error: 'missing_key' });
             return;
         }
 
-        if (req.method === 'POST' && path === '/message') {
-            if (!p.sessionId || !p.packet) { sendJson(res, 400, { error: 'missing_params' }); return; }
-            if (!sessions[p.sessionId]) sessions[p.sessionId] = { createdAt: Date.now(), messages: [] };
-            sessions[p.sessionId].createdAt = Date.now();
-            sessions[p.sessionId].messages.push({ packet: p.packet, time: Date.now() });
-            if (sessions[p.sessionId].messages.length > 50) {
-                sessions[p.sessionId].messages = sessions[p.sessionId].messages.slice(-50);
+        if (pathname === '/health' || pathname === '/ping') {
+            let waiting = 0, emoji = 0, ack = 0, msg = 0, webrtc = 0;
+            for (const key of Object.keys(lockers)) {
+                if (key.startsWith('waiting_')) waiting++;
+                else if (key.startsWith('emoji_')) emoji++;
+                else if (key.startsWith('ack_')) ack++;
+                else if (key.startsWith('msg_')) msg++;
+                else if (key.startsWith('webrtc_')) webrtc++;
             }
-            sendJson(res, 200, { status: 'ok' });
-            return;
-        }
-
-        if (req.method === 'GET' && path === '/message') {
-            const id = params.get('id');
-            const since = parseInt(params.get('since')) || 0;
-            const s = sessions[id];
-            if (!s) { sendJson(res, 200, { messages: [] }); return; }
-            s.createdAt = Date.now();
-            const msgs = s.messages.filter(m => m.time > since);
-            sendJson(res, 200, { messages: msgs });
-            return;
-        }
-
-        if (req.method === 'GET' && path === '/ping') {
             sendJson(res, 200, {
-                status: 'ok',
-                uptime: process.uptime(),
+                status: 'ok', uptime: process.uptime(),
                 lockers: Object.keys(lockers).length,
-                beacons: Object.keys(beacons).length,
-                sessions: Object.keys(sessions).length,
+                breakdown: { waiting, emoji, ack, msg, webrtc },
                 timestamp: Date.now()
             });
             return;
@@ -247,4 +192,9 @@ const server = http.createServer((req, res) => {
 });
 
 setInterval(cleanupAll, CLEANUP_INTERVAL);
-server.listen(PORT, () => console.log('🚀 P2PPong Render Server on port ' + PORT));
+setInterval(persistData, PERSIST_INTERVAL);
+
+process.on('SIGTERM', () => { persistData(); process.exit(0); });
+process.on('SIGINT', () => { persistData(); process.exit(0); });
+
+server.listen(PORT, () => console.log('P2PPong Render Server on port ' + PORT));
