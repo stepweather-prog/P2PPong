@@ -1,5 +1,5 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Финальная версия — многоразовые маяки, защита от мусора, метрики
+// Финал — DELETE по /delete?key= через GET
 
 var HiveRoom = class {
     constructor(ctx, env) {
@@ -29,7 +29,7 @@ var HiveRoom = class {
                 status: 204,
                 headers: {
                     ...securityHeaders,
-                    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Max-Age': '86400'
                 }
@@ -108,12 +108,8 @@ var HiveRoom = class {
                 });
             }
 
-            // Маяки НЕ помечаются как taken — они многоразовые
             const prefix = keyHash.split('_')[0] + '_';
-            if (prefix === 'waiting_' || prefix === 'emoji_' || prefix === 'ack_') {
-                // Не ставим taken — маяк доступен многократно в течение TTL
-            } else {
-                // msg_ и webrtc_ остаются одноразовыми
+            if (prefix === 'msg_' || prefix === 'webrtc_') {
                 entry.taken = true;
                 await this.ctx.storage.put(keyHash, entry);
             }
@@ -123,7 +119,8 @@ var HiveRoom = class {
             });
         }
 
-        if (request.method === 'DELETE' && url.pathname === '/beacon') {
+        // Совместимость с клиентом: GET /delete?key=...
+        if (url.pathname === '/delete') {
             const keyHash = url.searchParams.get('key');
             if (keyHash) {
                 await this.ctx.storage.delete(keyHash);
