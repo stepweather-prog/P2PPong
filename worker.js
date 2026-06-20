@@ -1,6 +1,4 @@
 // worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
-// Финал — DELETE по /delete?key= через GET
-
 var HiveRoom = class {
     constructor(ctx, env) {
         this.ctx = ctx;
@@ -53,7 +51,7 @@ var HiveRoom = class {
                 });
             }
 
-            if (keyHash.length > 128 || packet.length > 8192) {
+            if (keyHash.length > 128 || packet.length > 65536) {
                 return new Response(JSON.stringify({ error: 'too_large' }), {
                     status: 400,
                     headers: { ...securityHeaders, 'Content-Type': 'application/json' }
@@ -119,7 +117,6 @@ var HiveRoom = class {
             });
         }
 
-        // Совместимость с клиентом: GET /delete?key=...
         if (url.pathname === '/delete') {
             const keyHash = url.searchParams.get('key');
             if (keyHash) {
