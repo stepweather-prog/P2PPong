@@ -1,6 +1,4 @@
-// server.js — P2PPong Render Server (Финал)
-// In-memory Map, CORS, rate limiting, кластеризация опциональна
-
+// server.js — P2PPong Render Server
 const http = require('http');
 const cluster = require('cluster');
 const os = require('os');
@@ -67,7 +65,7 @@ function getRequestBody(req) {
         let body = '';
         req.on('data', chunk => {
             body += chunk.toString();
-            if (body.length > 100000) {
+            if (body.length > 200000) {
                 body = '';
                 req.destroy();
                 resolve(null);
@@ -79,12 +77,9 @@ function getRequestBody(req) {
     });
 }
 
-// Одиночный процесс — без кластеризации на Render
 if (cluster.isMaster && process.env.RENDER_SERVICE_ID) {
-    // На Render просто запускаем один процесс, без форков
     startServer();
 } else if (cluster.isMaster) {
-    // Вне Render — форкаем на все ядра
     const numCPUs = Math.min(os.cpus().length, 4);
     for (let i = 0; i < numCPUs; i++) {
         cluster.fork();
@@ -159,7 +154,7 @@ function startServer() {
                 res.end(JSON.stringify({ error: 'missing_params' }));
                 return;
             }
-            if (keyHash.length > 128 || packet.length > 8192) {
+            if (keyHash.length > 128 || packet.length > 65536) {
                 res.writeHead(400, { ...securityHeaders, 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ error: 'too_large' }));
                 return;
