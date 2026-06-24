@@ -1,4 +1,4 @@
-// server.js — P2PPong Render Server
+// server.js — P2PPong Render Server (правка 1)
 const http = require('http');
 const cluster = require('cluster');
 const os = require('os');
@@ -187,7 +187,8 @@ function startServer() {
                 res.end(JSON.stringify({ status: 'taken' }));
                 return;
             }
-            if (key.startsWith('msg_') || key.startsWith('webrtc_')) {
+            // ✅ Правка 1: taken = true только для webrtc_
+            if (key.startsWith('webrtc_')) {
                 entry.taken = true;
             }
             res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json' });
