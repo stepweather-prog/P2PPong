@@ -1,4 +1,4 @@
-// server.js — P2PPong Render Server (правка 1)
+// server.js — P2PPong Render Server (с /pool)
 const http = require('http');
 const cluster = require('cluster');
 const os = require('os');
@@ -10,6 +10,7 @@ const CLEANUP_INTERVAL = 30 * 1000;
 
 let requestCount = 0;
 const lockers = new Map();
+const pool = [];
 const rateLimit = new Map();
 
 const ALLOWED_ORIGINS = [
@@ -46,6 +47,13 @@ function cleanup() {
             lockers.delete(sorted[i][0]);
         }
     }
+    
+    // Чистка пула
+    const now2 = Date.now();
+    for (let i = pool.length - 1; i >= 0; i--) {
+        if (now2 - pool[i].createdAt > 300000) pool.splice(i, 1);
+    }
+    while (pool.length > 100) pool.shift();
 }
 
 function checkRateLimit(ip) {
@@ -104,7 +112,7 @@ function startServer() {
 
         const securityHeaders = {
             'Access-Control-Allow-Origin': allowedOrigin,
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type',
             'Access-Control-Max-Age': '86400',
             'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
@@ -144,6 +152,52 @@ function startServer() {
                 res.end(JSON.stringify({ error: 'invalid_json' }));
                 return;
             }
+        }
+
+        // Общий пул маяков
+        if (req.method === 'POST' && pathname === '/pool') {
+            if (!p.packet) {
+                res.writeHead(400, { ...securityHeaders, 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'missing_packet' }));
+                return;
+            }
+            if (p.packet.length > 65536) {
+                res.writeHead(400, { ...securityHeaders, 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'too_large' }));
+                return;
+            }
+            const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            pool.push({ id, packet: p.packet, createdAt: Date.now() });
+            const now = Date.now();
+            for (let i = pool.length - 1; i >= 0; i--) {
+                if (now - pool[i].createdAt > 300000) pool.splice(i, 1);
+            }
+            while (pool.length > 100) pool.shift();
+            res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ status: 'stored', id }));
+            return;
+        }
+
+        if (req.method === 'GET' && pathname === '/pool') {
+            const now = Date.now();
+            const active = pool.filter(b => now - b.createdAt <= 300000);
+            res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ beacons: active, count: active.length }));
+            return;
+        }
+
+        if (req.method === 'DELETE' && pathname === '/pool') {
+            const id = params.get('id');
+            if (id) {
+                const idx = pool.findIndex(b => b.id === id);
+                if (idx !== -1) pool.splice(idx, 1);
+                res.writeHead(200, { ...securityHeaders, 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'deleted' }));
+                return;
+            }
+            res.writeHead(400, { ...securityHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'missing_id' }));
+            return;
         }
 
         if (req.method === 'POST' && pathname === '/beacon') {
@@ -187,7 +241,6 @@ function startServer() {
                 res.end(JSON.stringify({ status: 'taken' }));
                 return;
             }
-            // ✅ Правка 1: taken = true только для webrtc_
             if (key.startsWith('webrtc_')) {
                 entry.taken = true;
             }
@@ -226,6 +279,7 @@ function startServer() {
                 pid: process.pid,
                 memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + 'MB',
                 lockers: lockers.size,
+                pool_size: pool.length,
                 breakdown: { waiting, emoji, ack, msg, webrtc },
                 timestamp: Date.now()
             }));
