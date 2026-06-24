@@ -1,4 +1,4 @@
-// worker.js — P2PPong Blind Locker (Cloudflare Durable Objects, правки 2-3)
+// worker.js — P2PPong Blind Locker (Cloudflare DO с /pool)
 var HiveRoom = class {
     constructor(ctx, env) {
         this.ctx = ctx;
@@ -8,14 +8,14 @@ var HiveRoom = class {
             'emoji_': 300000,
             'ack_': 300000,
             'msg_': 120000,
-            'webrtc_': 120000
+            'webrtc_': 120000,
+            'pool_': 300000
         };
     }
 
     async fetch(request) {
         const url = new URL(request.url);
 
-        // ✅ Правка 3: CORS — белый список
         const ALLOWED_ORIGINS = [
             'https://stepweather-prog.github.io',
             'https://localhost',
@@ -37,10 +37,78 @@ var HiveRoom = class {
                 status: 204,
                 headers: {
                     ...securityHeaders,
-                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+                    'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
                     'Access-Control-Allow-Headers': 'Content-Type',
                     'Access-Control-Max-Age': '86400'
                 }
+            });
+        }
+
+        // Общий пул маяков
+        if (request.method === 'POST' && url.pathname === '/pool') {
+            let body;
+            try { body = await request.json(); } catch(e) {
+                return new Response(JSON.stringify({ error: 'invalid_json' }), {
+                    status: 400,
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+            if (!body.packet) {
+                return new Response(JSON.stringify({ error: 'missing_packet' }), {
+                    status: 400,
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+            if (body.packet.length > 65536) {
+                return new Response(JSON.stringify({ error: 'too_large' }), {
+                    status: 400,
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+            const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+            await this.ctx.storage.put('pool_' + id, {
+                packet: body.packet,
+                createdAt: Date.now()
+            }, { expirationTtl: 300 });
+            
+            // Лимит 100 маяков
+            const all = await this.ctx.storage.list({ prefix: 'pool_' });
+            if (all.size > 100) {
+                const sorted = [...all.entries()]
+                    .sort((a, b) => a[1].createdAt - b[1].createdAt);
+                const toDelete = sorted.slice(0, sorted.length - 100);
+                for (const [key] of toDelete) {
+                    await this.ctx.storage.delete(key);
+                }
+            }
+            
+            return new Response(JSON.stringify({ status: 'stored', id }), {
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (request.method === 'GET' && url.pathname === '/pool') {
+            const all = await this.ctx.storage.list({ prefix: 'pool_' });
+            const beacons = [];
+            for (const [key, entry] of all) {
+                beacons.push({ id: key.replace('pool_', ''), packet: entry.packet });
+            }
+            return new Response(JSON.stringify({ beacons, count: beacons.length }), {
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+            });
+        }
+
+        if (request.method === 'DELETE' && url.pathname === '/pool') {
+            const id = url.searchParams.get('id');
+            if (id) {
+                await this.ctx.storage.delete('pool_' + id);
+                return new Response(JSON.stringify({ status: 'deleted' }), {
+                    headers: { ...securityHeaders, 'Content-Type': 'application/json' }
+                });
+            }
+            return new Response(JSON.stringify({ error: 'missing_id' }), {
+                status: 400,
+                headers: { ...securityHeaders, 'Content-Type': 'application/json' }
             });
         }
 
@@ -117,7 +185,6 @@ var HiveRoom = class {
             }
 
             const prefix = keyHash.split('_')[0] + '_';
-            // ✅ Правка 2: taken = true только для webrtc_
             if (prefix === 'webrtc_') {
                 entry.taken = true;
                 await this.ctx.storage.put(keyHash, entry);
@@ -145,9 +212,10 @@ var HiveRoom = class {
         if (url.pathname === '/health') {
             const all = await this.ctx.storage.list();
             const now = Date.now();
-            let waiting = 0, emoji = 0, ack = 0, msg = 0, webrtc = 0;
+            let waiting = 0, emoji = 0, ack = 0, msg = 0, webrtc = 0, pool_count = 0;
             for (const [key, entry] of all) {
-                if (key.startsWith('waiting_')) waiting++;
+                if (key.startsWith('pool_')) pool_count++;
+                else if (key.startsWith('waiting_')) waiting++;
                 else if (key.startsWith('emoji_')) emoji++;
                 else if (key.startsWith('ack_')) ack++;
                 else if (key.startsWith('msg_')) msg++;
@@ -156,7 +224,8 @@ var HiveRoom = class {
             return new Response(JSON.stringify({
                 status: 'ok',
                 lockers: all.size,
-                breakdown: { waiting, emoji, ack, msg, webrtc },
+                pool_size: pool_count,
+                breakdown: { waiting, emoji, ack, msg, webrtc, pool: pool_count },
                 timestamp: now
             }), {
                 headers: { ...securityHeaders, 'Content-Type': 'application/json' }
