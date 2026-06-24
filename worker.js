@@ -1,4 +1,4 @@
-// worker.js — P2PPong Blind Locker (Cloudflare Durable Objects)
+// worker.js — P2PPong Blind Locker (Cloudflare Durable Objects, правки 2-3)
 var HiveRoom = class {
     constructor(ctx, env) {
         this.ctx = ctx;
@@ -15,11 +15,21 @@ var HiveRoom = class {
     async fetch(request) {
         const url = new URL(request.url);
 
+        // ✅ Правка 3: CORS — белый список
+        const ALLOWED_ORIGINS = [
+            'https://stepweather-prog.github.io',
+            'https://localhost',
+            'https://127.0.0.1'
+        ];
+        const origin = request.headers.get('Origin') || '';
+        const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+
         const securityHeaders = {
-            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Origin': allowedOrigin,
             'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
             'X-Content-Type-Options': 'nosniff',
-            'X-Frame-Options': 'DENY'
+            'X-Frame-Options': 'DENY',
+            'Vary': 'Origin'
         };
 
         if (request.method === 'OPTIONS') {
@@ -107,7 +117,8 @@ var HiveRoom = class {
             }
 
             const prefix = keyHash.split('_')[0] + '_';
-            if (prefix === 'msg_' || prefix === 'webrtc_') {
+            // ✅ Правка 2: taken = true только для webrtc_
+            if (prefix === 'webrtc_') {
                 entry.taken = true;
                 await this.ctx.storage.put(keyHash, entry);
             }
