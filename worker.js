@@ -17,10 +17,11 @@ var HiveRoom = class {
         const url = new URL(request.url);
 
         const ALLOWED_ORIGINS = [
-            'https://stepweather-prog.github.io',
-            'https://localhost',
-            'https://127.0.0.1'
-        ];
+    'https://stepweather-prog.github.io',
+    'https://robinhood-p2-ipi8jic61-robinhood-p2-p.vercel.app',
+    'https://localhost',
+    'https://127.0.0.1'
+];
         const origin = request.headers.get('Origin') || '';
         const allowedOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
 
